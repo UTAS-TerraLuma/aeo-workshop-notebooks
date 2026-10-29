@@ -1,0 +1,35 @@
+# Workshop requirements — MicaSense drone data analysis
+# Install everything with:   pip install -r requirements.txt
+# (conda/mamba: environment.yml, pixi: pixi.toml — keep all three in sync)
+
+# Core raster and array handling
+rasterio>=1.3.0
+xarray>=2024.1.0
+numpy>=1.26.0
+pyproj>=3.6.0
+rioxarray>=0.15
+scipy>=1.11
+
+# Parallel / out-of-core processing (bokeh powers the dask dashboard)
+dask>=2024.1.0
+distributed>=2024.1.0
+bokeh>=3.1
+
+# Visualisation (Plotly for notebook charts, Folium for interactive maps)
+plotly>=5.20.0
+folium>=0.15.0
+
+# Tabular data
+pandas>=2.2.0
+
+# Jupyter notebook environment and interactive controls
+jupyterlab>=4.2.0
+notebook>=7.2.0
+ipywidgets>=8.1.0
+nbformat>=5.10.0
+
+# Matplotlib is used internally by some dependencies; keep it available
+matplotlib>=3.8.0
+
+# Strips notebook outputs on commit
+nbstripout
