@@ -8,7 +8,8 @@ folder must also be here:
 
     workshop/
     ├── data/
-    │   └── NTABRT0007-20240828-ms-cog.tif
+    │   ├── NTABRT0007-20240828-ms-cog-subset.tif
+    │   └── NTABRT0007-20240828-ms-cog-subset3.tif
     ├── workshop_utils.py          ← this file
     ├── ch1_bands_and_visualisation.ipynb
     ├── ch2_spectral_indices.ipynb
@@ -30,7 +31,8 @@ _HERE = Path(__file__).resolve().parent
 # ---------------------------------------------------------------------------
 # Default data path — notebooks can override this if needed
 # ---------------------------------------------------------------------------
-DATA_PATH = _HERE / "data" / "NTABRT0007-20240828-ms-cog.tif"
+# Chapters 2-4 use subset3; Chapter 1 sets its own RASTER_FILENAME (subset).
+DATA_PATH = _HERE / "data" / "NTABRT0007-20240828-ms-cog-subset3.tif"
 
 # ---------------------------------------------------------------------------
 # Band catalogue — MicaSense RedEdge-P Dual, 10 bands
@@ -123,7 +125,7 @@ def load_data(path=None):
     if not p.exists():
         raise FileNotFoundError(
             f"Raster not found: {p}\n"
-            "Copy the 10-band GeoTIFF to data/NTABRT0007-20240828-ms-cog.tif, or set DATA_PATH "
+            f"Copy the 10-band GeoTIFF to data/{DATA_PATH.name}, or set DATA_PATH "
             "in the notebook to the correct file."
         )
 

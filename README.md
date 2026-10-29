@@ -42,7 +42,14 @@ The dependency lists live in `pixi.toml`, `environment.yml` and `requirements.tx
 
 ## Data
 
-The imagery is not stored in git, and `data/` is ignored. For now, put the GeoTIFFs in `data/` yourself. `workshop_utils.DATA_PATH` expects `data/NTABRT0007-20240828-ms-cog.tif`. Eventually the data will be downloaded from URLs.
+The imagery is not stored in git, and `data/` is ignored. For now, put the GeoTIFFs in `data/` yourself. Eventually the data will be downloaded from URLs.
+
+| File | Used by |
+| --- | --- |
+| `data/NTABRT0007-20240828-ms-cog-subset.tif` | Chapter 1 |
+| `data/NTABRT0007-20240828-ms-cog-subset3.tif` | Chapters 2–4, and `workshop_utils.DATA_PATH` |
+
+Each notebook sets its file with `RASTER_FILENAME` near the top.
 
 Files the notebooks write go to `outputs/`, which is also ignored.
 
