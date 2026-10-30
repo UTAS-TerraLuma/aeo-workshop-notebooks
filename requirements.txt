@@ -10,10 +10,8 @@ pyproj>=3.6.0
 rioxarray>=0.15
 scipy>=1.11
 
-# Parallel / out-of-core processing (bokeh powers the dask dashboard)
-dask>=2024.1.0
-distributed>=2024.1.0
-bokeh>=3.1
+# Reads the imagery from the workshop STAC catalogue
+pystac>=1.10
 
 # Visualisation (Plotly for notebook charts, Folium for interactive maps)
 plotly>=5.20.0

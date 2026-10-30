@@ -1,0 +1,89 @@
+#cloud-config
+# First-boot setup for the AEO 2026 workshop JupyterHub on a Nectar VM.
+#
+# Paste this whole file into Launch Instance -> Configuration ->
+# Customisation Script (Direct Input) after filling in the CHANGE_ME values
+# in /root/aeo-hub-setup.sh below. Image: Ubuntu 24.04 LTS (22.04 also works).
+#
+# It installs The Littlest JupyterHub (TLJH), clones this repo to
+# /opt/aeo-workshop-notebooks, installs the workshop packages
+# (hub/install-env.sh), applies the hub settings (hub/configure.sh) and runs
+# hub/smoke_test.py. It takes roughly 15-25 minutes. Progress:
+#
+#   ssh ubuntu@<ip> 'sudo tail -f /var/log/aeo-hub-setup.log'
+#
+# Finished when /var/log/aeo-hub-setup.done exists.
+#
+# No passwords or secrets here: anyone logged in to the VM, including
+# attendees, can read this file from the cloud metadata service.
+
+package_update: true
+package_upgrade: true
+packages:
+  - python3
+  - python3-dev
+  - git
+  - curl
+
+write_files:
+  # Wait for apt locks (unattended-upgrades runs on first boot) instead of
+  # failing. Applies to the apt calls the TLJH installer makes too.
+  - path: /etc/apt/apt.conf.d/99aeo-lock-timeout
+    content: |
+      DPkg::Lock::Timeout "900";
+
+  - path: /root/aeo-hub-setup.sh
+    permissions: "0700"
+    content: |
+      #!/usr/bin/env bash
+      # Re-runnable: sudo bash /root/aeo-hub-setup.sh
+      set -euo pipefail
+
+      # ---- CHANGE THESE -------------------------------------------------
+      # Your hub admin login (lower case, no spaces). Setup generates the
+      # admin and workshop passwords; read them over ssh afterwards with
+      #   sudo cat /root/admin-password.txt /root/workshop-password.txt
+      ADMIN_USER="CHANGE_ME_admin_username"
+      # Public git URL of this repo (must be pushed before launching)
+      REPO_URL="https://github.com/UTAS-TerraLuma/aeo-workshop-notebooks.git"
+      REPO_BRANCH="main"
+      # -------------------------------------------------------------------
+
+      TLJH_VERSION="2.0.0"
+      REPO_DIR=/opt/aeo-workshop-notebooks
+      exec >>/var/log/aeo-hub-setup.log 2>&1
+      export HOME=/root
+      echo "===== $(date) AEO hub setup starting"
+
+      case "$ADMIN_USER $REPO_URL" in
+        *CHANGE_ME*) echo "Fill in the CHANGE_ME values in /root/aeo-hub-setup.sh, then: sudo bash /root/aeo-hub-setup.sh"; exit 1 ;;
+      esac
+
+      echo "===== Installing TLJH $TLJH_VERSION (admin: $ADMIN_USER)"
+      curl -fsSL https://tljh.jupyter.org/bootstrap.py \
+        | python3 - --version "$TLJH_VERSION" --admin "$ADMIN_USER" --show-progress-page
+
+      echo "===== Cloning $REPO_URL ($REPO_BRANCH)"
+      if [ -d "$REPO_DIR/.git" ]; then
+        git -C "$REPO_DIR" pull --ff-only
+      else
+        git clone --branch "$REPO_BRANCH" "$REPO_URL" "$REPO_DIR"
+      fi
+
+      echo "===== Installing workshop packages"
+      bash "$REPO_DIR/hub/install-env.sh"
+
+      echo "===== Configuring the hub"
+      bash "$REPO_DIR/hub/configure.sh"
+
+      echo "===== Smoke test"
+      /opt/tljh/user/bin/python "$REPO_DIR/hub/smoke_test.py" \
+        || echo "Smoke test FAILED: see the lines above"
+
+      touch /var/log/aeo-hub-setup.done
+      echo "===== $(date) AEO hub setup finished"
+
+runcmd:
+  - [bash, /root/aeo-hub-setup.sh]
+
+final_message: "cloud-init finished after $UPTIME s. AEO hub log: /var/log/aeo-hub-setup.log"

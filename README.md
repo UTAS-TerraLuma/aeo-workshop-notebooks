@@ -4,7 +4,7 @@ Jupyter notebooks for analysing MicaSense RedEdge-P Dual multispectral drone ima
 
 | Notebook | Topic |
 | --- | --- |
-| `CHAPTER1_DATA_and_VISUALISATION_DASK.ipynb` | Loading the data and visualising bands |
+| `CHAPTER1_DATA_and_VISUALISATION.ipynb` | Loading the data and visualising bands |
 | `CHAPTER2_COMPUTING_VISUALISING_DERIVATIVES_FINAL.ipynb` | Computing and visualising spectral indices |
 | `CHAPTER3_QA_MASKING.ipynb` | QA and masking |
 | `CHAPTER4_OPTIONAL_PROXY_DERIVATIVES.ipynb` | Optional: proxy derivatives |
@@ -40,10 +40,13 @@ pip install -r requirements.txt
 
 The dependency lists live in `pixi.toml`, `environment.yml` and `requirements.txt`. Update all three when you add a package.
 
+### Hosted JupyterHub (Nectar)
+
+To run the workshop on a shared JupyterHub, follow [`hub/WALKTHROUGH.md`](hub/WALKTHROUGH.md).
+
 ## Running the notebooks
 
-1. **Get the data.** Copy the GeoTIFFs listed under [Data](#data) into `data/`.
-2. **Start Jupyter from the repo root.** The notebooks look for `workshop_utils.py` and `data/` in the folder Jupyter was started from. Starting it anywhere else gives a `FileNotFoundError` in the first code cell.
+1. **Start Jupyter from the repo root.** The notebooks import `workshop_utils.py` from the folder Jupyter was started from. Starting it anywhere else gives a `ModuleNotFoundError` in the first code cell.
 
    ```bash
    pixi run lab
@@ -52,11 +55,10 @@ The dependency lists live in `pixi.toml`, `environment.yml` and `requirements.tx
    Or, with conda/mamba: `mamba activate aeo-workshop`, then `jupyter lab`.
 
    Jupyter Lab opens in your browser. If it doesn't, copy the `http://localhost:8888/lab?token=…` link from the terminal.
-3. **Run the chapters in order, 1 → 4.** In each notebook use **Kernel → Restart Kernel and Run All Cells**, or step through with <kbd>Shift</kbd>+<kbd>Enter</kbd>. Each chapter loads the raster on its own, so you can open any chapter directly. Chapter 4 is optional and the longest.
-4. **Skip the install cell.** Chapter 1's first code cell has commented-out `%pip install` lines. Your environment already has everything, so leave them commented.
-5. **Watch Dask (optional).** The setup cell starts a local Dask cluster and prints a `Dask dashboard:` link. Open it in another tab to see the work in progress.
-6. **Use the widgets.** The dropdowns, sliders and maps only respond while the kernel is running. Change a widget and its plot redraws.
-7. **Shut down when finished.** Use **File → Shut Down**, or press <kbd>Ctrl</kbd>+<kbd>C</kbd> twice in the terminal. Each notebook runs its own Dask cluster, so shut down kernels you're done with (**Kernel → Shut Down Kernel**) to free memory.
+2. **Run the chapters in order, 1 → 4.** In each notebook use **Kernel → Restart Kernel and Run All Cells**, or step through with <kbd>Shift</kbd>+<kbd>Enter</kbd>. Each chapter loads the imagery on its own, so you can open any chapter directly. Chapter 4 is optional and the longest.
+3. **Stay online.** The imagery streams from the workshop STAC catalogue (see [Data](#data)), so loading needs an internet connection and takes 10–20 seconds.
+4. **Use the widgets.** The dropdowns, sliders and maps only respond while the kernel is running. Change a widget and its plot redraws.
+5. **Shut down when finished.** Use **File → Shut Down**, or press <kbd>Ctrl</kbd>+<kbd>C</kbd> twice in the terminal. Each open notebook holds its imagery in memory, so shut down kernels you're done with (**Kernel → Shut Down Kernel**).
 
 | Chapter | What it does | Writes to `outputs/` |
 | --- | --- | --- |
@@ -65,27 +67,12 @@ The dependency lists live in `pixi.toml`, `environment.yml` and `requirements.tx
 | 3 | Masks NDVI by threshold and range, with an interactive map and histogram | `masked_ndvi.tif` |
 | 4 | Optional: normalises the indices, pigment-proxy composite, thresholding, basemap overlay | `pigment_rgb_relative.tif` |
 
-To use a different raster, edit `RASTER_FILENAME` in the setup cell near the top of the notebook.
+To use a different survey or study area, pass `item_id=` or `bounds=` to `load_data()`, or change `ITEM_ID` and `AOI_BOUNDS` in `workshop_utils.py`.
 
 ## Data
 
-The imagery is not stored in git, and `data/` is ignored. For now, put the GeoTIFFs in `data/` yourself. Eventually the data will be downloaded from URLs.
+The imagery comes from the AEO 2026 workshop STAC catalogue on Nectar object storage:
 
-| File | Used by |
-| --- | --- |
-| `data/NTABRT0007-20240828-ms-cog-subset.tif` | Chapter 1 |
-| `data/NTABRT0007-20240828-ms-cog-subset3.tif` | Chapters 2–4, and `workshop_utils.DATA_PATH` |
+<https://object-store.rc.nectar.org.au/v1/AUTH_4df2f67c2eed48a2aaeeed008a4bf0de/aeo2026-workshop/collection.json>
 
-Each notebook sets its file with `RASTER_FILENAME` near the top.
-
-Files the notebooks write go to `outputs/`, which is also ignored.
-
-## Committing notebooks
-
-The notebooks contain large embedded outputs. One of them is over 240 MB, which is too big for GitHub. The repo uses [nbstripout](https://github.com/kynan/nbstripout) as a git filter: outputs stay in your working copy, and only code and markdown are committed. Run this once after cloning:
-
-```bash
-pixi run setup-git
-```
-
-Or, from an activated conda env: `nbstripout --install --attributes .gitattributes`.
+Each item is one drone survey (`PLOTID-YYYYMMDD`). The notebooks use the `ms` asset (the 10-band MicaSense orthomosaic) of `NTABRT0007-20240828`. That file is a 2.8 GB cloud-optimised GeoTIFF, so `workshop_utils.load_data()` reads only a small study area (`AOI_BOUNDS`, 1342 × 1265 pixels). Nothing is downloaded to disk.

@@ -3,36 +3,44 @@ workshop_utils.py
 =================
 Shared helpers for the MicaSense drone data analysis workshop.
 
-This file must sit in the same folder as the workshop notebooks. The data
-folder must also be here:
-
-    workshop/
-    ├── data/
-    │   ├── NTABRT0007-20240828-ms-cog-subset.tif
-    │   └── NTABRT0007-20240828-ms-cog-subset3.tif
-    ├── workshop_utils.py          ← this file
-    ├── ch1_bands_and_visualisation.ipynb
-    ├── ch2_spectral_indices.ipynb
-    └── ch3_normalisation_and_maps.ipynb
+This file must sit in the same folder as the workshop notebooks. The imagery
+is read straight from the workshop STAC catalogue (see STAC_COLLECTION_URL),
+so there is nothing to download.
 """
 
 # What this does: provides the shared raster, index, and display helpers used
-# by all three Jupyter notebooks.
+# by all the Jupyter notebooks.
+import os
 from pathlib import Path
-import struct
-import zlib
-import base64
 import numpy as np
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
+from pyproj import CRS
+import pystac
 import rasterio
+from rasterio.windows import from_bounds
 import xarray as xr
 
-_HERE = Path(__file__).resolve().parent
+# ---------------------------------------------------------------------------
+# Data source: the AEO 2026 workshop STAC catalogue on Nectar object storage
+# ---------------------------------------------------------------------------
+STAC_COLLECTION_URL = (
+    "https://object-store.rc.nectar.org.au/v1/AUTH_4df2f67c2eed48a2aaeeed008a4bf0de"
+    "/aeo2026-workshop/collection.json"
+)
+# One survey (PLOTID-YYYYMMDD) and its multispectral orthomosaic asset.
+ITEM_ID = "NTABRT0007-20240828"
+ASSET_KEY = "ms"
 
-# ---------------------------------------------------------------------------
-# Default data path — notebooks can override this if needed
-# ---------------------------------------------------------------------------
-# Chapters 2-4 use subset3; Chapter 1 sets its own RASTER_FILENAME (subset).
-DATA_PATH = _HERE / "data" / "NTABRT0007-20240828-ms-cog-subset3.tif"
+# The full orthomosaic is ~2.8 GB, so we only read a small study area.
+# Bounds are (left, bottom, right, top) in the raster's CRS (GDA2020 / MGA 53).
+# This is the same area as the old local "subset3" file: 1342 x 1265 pixels.
+AOI_BOUNDS = (359842.06, 7534681.29, 359909.39, 7534744.75)
+
+# Make GDAL's HTTP reads of cloud-optimised GeoTIFFs quick.
+os.environ.setdefault("GDAL_DISABLE_READDIR_ON_OPEN", "EMPTY_DIR")
+os.environ.setdefault("CPL_VSIL_CURL_ALLOWED_EXTENSIONS", ".tif")
+os.environ.setdefault("GDAL_HTTP_MERGE_CONSECUTIVE_RANGES", "YES")
 
 # ---------------------------------------------------------------------------
 # Band catalogue — MicaSense RedEdge-P Dual, 10 bands
@@ -53,7 +61,7 @@ BAND_INFO = [
 # ---------------------------------------------------------------------------
 # Index catalogue
 # NDVI is included as a widely-known reference index.
-# CCI, CIRE, CRI2, ARI2 are the four pigment-sensitive indices for this workshop.
+# CIRE, CRI2, ARI2 are the three pigment-sensitive indices for this workshop.
 # ---------------------------------------------------------------------------
 INDEX_INFO = {
     "NDVI": {
@@ -66,16 +74,6 @@ INDEX_INFO = {
         "vlim":          (-0.1, 0.85),
         "pigment":       False,
     },
-    # "CCI": {
-        # "full_name":     "Chlorophyll/Carotenoid Index",
-        # "formula":       "(Green-531 − Red-668) / (Green-531 + Red-668)",
-        # "bands_used":    "Green-531, Red-668",
-        # "purpose":       "Tracks the ratio of chlorophyll (green) to carotenoid (red-absorbing) pigments.",
-        # "interpretation":"Higher = more chlorophyll relative to carotenoids  ·  Lower = pigment stress or senescence",
-        # "cmap":          "RdYlGn",
-        # "vlim":          (-1.0, 1.0),
-        # "pigment":       True,
-    # },
     "CIRE": {
         "full_name":     "Chlorophyll Index Red-Edge",
         "formula":       "(NIR-842 / Red-Edge-705) − 1",
@@ -108,35 +106,50 @@ INDEX_INFO = {
     },
 }
 
-# Ordered list of all five workshop index names
-WORKSHOP_INDICES = list(INDEX_INFO.keys())   # ["NDVI","CCI","CIRE","CRI2","ARI2"]
+# Ordered list of the workshop index names: ["NDVI", "CIRE", "CRI2", "ARI2"]
+WORKSHOP_INDICES = list(INDEX_INFO.keys())
 
-# # ---------------------------------------------------------------------------
-# # Data-loading helpers
-# # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# Data-loading helpers
+# ---------------------------------------------------------------------------
 
-def load_data(path=None):
+def get_asset_href(item_id=ITEM_ID, asset_key=ASSET_KEY,
+                   collection_url=STAC_COLLECTION_URL):
+    """Look up a survey in the STAC collection and return the URL of one asset."""
+    collection = pystac.Collection.from_file(collection_url)
+    item = collection.get_item(item_id)
+    if item is None:
+        ids = [i.id for i in collection.get_items()]
+        raise KeyError(f"No item {item_id!r} in the collection. Available: {ids}")
+    return item.assets[asset_key].get_absolute_href()
+
+
+def load_data(item_id=ITEM_ID, bounds=AOI_BOUNDS):
     """
-    Load the MicaSense GeoTIFF as an xarray.Dataset.
-    NoData pixels (value 0 in the raw file) are automatically set to NaN.
-    If path is None, DATA_PATH is used.
-    """
-    p = Path(path) if path else DATA_PATH
-    if not p.exists():
-        raise FileNotFoundError(
-            f"Raster not found: {p}\n"
-            f"Copy the 10-band GeoTIFF to data/{DATA_PATH.name}, or set DATA_PATH "
-            "in the notebook to the correct file."
-        )
+    Read the MicaSense multispectral orthomosaic from the STAC catalogue as an
+    xarray.Dataset with one variable per band.
 
-    with rasterio.open(p) as src:
+    Only the pixels inside `bounds` (left, bottom, right, top, in the raster's
+    CRS) are downloaded. Pass bounds=None to read the whole orthomosaic, which
+    is several GB. NoData and non-positive reflectance become NaN.
+    """
+    href = get_asset_href(item_id)
+
+    with rasterio.open(href) as src:
         if src.count != len(BAND_INFO):
             raise ValueError(
                 f"Expected {len(BAND_INFO)} bands for a MicaSense RedEdge-P "
-                f"Dual image, but {p.name} contains {src.count}."
+                f"Dual image, but {href} contains {src.count}."
             )
 
-        data = src.read(out_dtype="float32")
+        if bounds is None:
+            window = rasterio.windows.Window(0, 0, src.width, src.height)
+        else:
+            window = from_bounds(*bounds, transform=src.transform)
+            window = window.round_offsets().round_lengths()
+        transform = src.window_transform(window)
+
+        data = src.read(window=window, out_dtype="float32")
         nodata = src.nodata
         invalid = ~np.isfinite(data)
         if nodata is not None:
@@ -145,22 +158,23 @@ def load_data(path=None):
         invalid |= data <= 0
         data[invalid] = np.nan
 
-        x = src.transform.c + (np.arange(src.width) + 0.5) * src.transform.a
-        y = src.transform.f + (np.arange(src.height) + 0.5) * src.transform.e
+        height, width = data.shape[1:]
+        x = transform.c + (np.arange(width) + 0.5) * transform.a
+        y = transform.f + (np.arange(height) + 0.5) * transform.e
         variables = {
             band["var"]: (("y", "x"), data[i])
             for i, band in enumerate(BAND_INFO)
         }
         ds = xr.Dataset(variables, coords={"x": x, "y": y})
         ds.attrs.update({
-            "filename": p.name,
-            "source_path": str(p.resolve()),
+            "filename": f"{item_id} ({ASSET_KEY})",
+            "source_path": href,
             "instrument": "MicaSense RedEdge-P Dual",
-            "image_width_px": src.width,
-            "image_height_px": src.height,
-            "pixel_size_m": float(abs(src.transform.a)),
+            "image_width_px": width,
+            "image_height_px": height,
+            "pixel_size_m": float(abs(transform.a)),
             "crs": str(src.crs),
-            "transform": tuple(src.transform),
+            "transform": tuple(transform),
         })
         for band in BAND_INFO:
             ds[band["var"]].attrs.update({
@@ -169,45 +183,6 @@ def load_data(path=None):
                 "fwhm_nm": band["fwhm"],
             })
     return ds
-
-
-# def compute_indices(ds, names=None):
-#     """
-#     Calculate spectral indices and attach them as new variables in ds.
-#     names: list of index keys from INDEX_INFO; defaults to all five.
-#     Returns the updated dataset.
-#     """
-#     if names is None:
-#         names = WORKSHOP_INDICES
-
-#     formulas = {
-#         "NDVI": lambda d: _safe_divide(d["nir842"] - d["red668"], d["nir842"] + d["red668"]),
-#         "CCI":  lambda d: _safe_divide(d["green"] - d["red668"], d["green"] + d["red668"]),
-#         "CIRE": lambda d: _safe_divide(d["nir842"], d["re705"]) - 1.0,
-#         "CRI2": lambda d: _safe_divide(1.0, d["green"]) - _safe_divide(1.0, d["re705"]),
-#         "ARI2": lambda d: d["nir842"] * (
-#             _safe_divide(1.0, d["green560"]) - _safe_divide(1.0, d["re705"])
-#         ),
-#     }
-#     unknown = sorted(set(names) - formulas.keys())
-#     if unknown:
-#         raise KeyError(f"Unknown workshop index/indices: {', '.join(unknown)}")
-
-#     out = ds.copy()
-#     for name in names:
-#         values = formulas[name](out).astype("float32")
-#         values = values.where(np.isfinite(values))
-#         values.attrs.update({
-#             "long_name": INDEX_INFO[name]["full_name"],
-#             "formula": INDEX_INFO[name]["formula"],
-#         })
-#         out[name] = values
-#     return out
-
-
-# def _safe_divide(numerator, denominator, eps=1e-10):
-#     """Divide xarray objects while masking zero or near-zero denominators."""
-#     return numerator / denominator.where(np.abs(denominator) > eps)
 
 
 def compute_indices(ds, names=None, reflectance_floor=0.01):
@@ -237,10 +212,6 @@ def compute_indices(ds, names=None, reflectance_floor=0.01):
             d["nir842"] - d["red668"],
             d["nir842"] + d["red668"],
         ),
-        "CCI": lambda d: _safe_divide(
-            d["green"] - d["red668"],
-            d["green"] + d["red668"],
-        ),
         "CIRE": lambda d: _safe_divide(d["nir842"], d["re705"]) - 1.0,
         "CRI2": lambda d: (
             _safe_divide(1.0, d["green"])
@@ -254,7 +225,6 @@ def compute_indices(ds, names=None, reflectance_floor=0.01):
 
     required_bands = {
         "NDVI": ("nir842", "red668"),
-        "CCI": ("green", "red668"),
         "CIRE": ("nir842", "re705"),
         "CRI2": ("green", "re705"),
         "ARI2": ("nir842", "green560", "re705"),
@@ -350,36 +320,6 @@ def to_uint8(rgb01):
     return np.round(np.clip(rgb01, 0.0, 1.0) * 255).astype(np.uint8)
 
 
-def array_to_png_b64(rgb_uint8):
-    """
-    Convert a (H, W, 3) uint8 numpy array to a PNG data-URI string.
-    Uses only the Python standard library — no Pillow required.
-    The returned string can be used directly in HTML <img> tags or
-    as the image source in a Folium ImageOverlay.
-    """
-    h, w = rgb_uint8.shape[:2]
-
-    def _chunk(ctype, data):
-        # PNG chunk: Length(4) + Type(4) + Data(n) + CRC32(4)
-        payload = ctype + data
-        return (
-            struct.pack(">I", len(data))
-            + payload
-            + struct.pack(">I", zlib.crc32(payload) & 0xFFFFFFFF)
-        )
-
-    sig  = b"\x89PNG\r\n\x1a\n"
-    # IHDR: width, height, bit-depth=8, colour-type=2(RGB), compress=0, filter=0, interlace=0
-    ihdr = _chunk(b"IHDR", struct.pack(">IIBBBBB", w, h, 8, 2, 0, 0, 0))
-    # Raw pixel data: filter-byte 0 (None) + R,G,B bytes per row
-    raw  = b"".join(b"\x00" + rgb_uint8[y].tobytes() for y in range(h))
-    idat = _chunk(b"IDAT", zlib.compress(raw, level=6))
-    iend = _chunk(b"IEND", b"")
-
-    png_bytes = sig + ihdr + idat + iend
-    return "data:image/png;base64," + base64.b64encode(png_bytes).decode()
-
-
 # ---------------------------------------------------------------------------
 # Index export and visualisation helpers
 # ---------------------------------------------------------------------------
@@ -470,7 +410,7 @@ def save_indices_to_tiff(
     dtype="float32",
 ):
     """
-    Export NDVI, CCI, CIRE, CRI2, ARI2 as GeoTIFF files.
+    Export the workshop indices as GeoTIFF files.
 
     Use ``out_path`` to create one multi-band GeoTIFF, or ``out_dir`` to
     create one file per index. If neither is supplied, per-index files are
@@ -565,819 +505,6 @@ def save_indices_to_tiff(
     for path in written:
         print(f"Saved: {path}")
     return written
-
-
-from pathlib import Path
-import numpy as np
-from pyproj import CRS
-import plotly.graph_objects as go
-from plotly.subplots import make_subplots
-
-
-def plot_indices(
-    ds,
-    indices=None,
-    colorscale=None,
-    cols=2,
-    robust=True,
-    vmin=None,
-    vmax=None,
-    show_colorbars=False,
-    width_per_panel=430,
-    height_per_panel=390,
-    save_path=None,
-    show=True,
-):
-    """
-    Plot spectral indices interactively with Plotly using the dataset's
-    native projected CRS.
-
-    The original arrays are displayed without spatial downsampling.
-    Projected x/y coordinates are used directly, normally as Easting and
-    Northing in metres.
-
-    Parameters
-    ----------
-    ds : xarray.Dataset
-        Dataset containing x/y coordinates and calculated indices.
-    indices : sequence of str, optional
-        Index variables to plot.
-    colorscale : str or dict, optional
-        Plotly colour scale, either global or keyed by index.
-    cols : int
-        Number of subplot columns.
-    robust : bool
-        If True, use P2-P98 as the default display limits.
-    vmin, vmax : float or dict, optional
-        Explicit display limits, either global or keyed by index.
-    show_colorbars : bool
-        Show a separate colour bar for each index.
-    save_path : str or Path, optional
-        Standalone HTML output path.
-    show : bool
-        Display the figure in the notebook.
-    """
-
-    names = _resolve_indices(ds, indices)
-
-    if cols < 1:
-        raise ValueError("cols must be at least 1.")
-
-    # --------------------------------------------------------
-    # Read projected coordinates
-    # --------------------------------------------------------
-    x = np.asarray(ds["x"].values, dtype=np.float64)
-    y = np.asarray(ds["y"].values, dtype=np.float64)
-
-    rows_px = ds.sizes["y"]
-    cols_px = ds.sizes["x"]
-
-    if x.size != cols_px or y.size != rows_px:
-        raise ValueError(
-            "The x/y coordinate lengths do not match the raster dimensions."
-        )
-
-    if x.ndim != 1 or y.ndim != 1:
-        raise ValueError("Projected x and y coordinates must be one-dimensional.")
-
-    if x.size < 2 or y.size < 2:
-        raise ValueError("At least two x and y coordinates are required.")
-
-    # --------------------------------------------------------
-    # Read and validate the source CRS
-    # --------------------------------------------------------
-    source_crs = CRS.from_user_input(_dataset_crs(ds))
-
-    if not source_crs.is_projected:
-        raise ValueError(
-            "plot_indices expected a projected CRS, but found "
-            f"{source_crs.to_string()}."
-        )
-
-    crs_name = source_crs.name
-    crs_id = source_crs.to_string()
-
-    # Determine the projected coordinate unit
-    unit_name = (
-        source_crs.axis_info[0].unit_name
-        if source_crs.axis_info
-        else "projected unit"
-    )
-
-    if unit_name and unit_name.lower() in {"metre", "meter", "metres", "meters"}:
-        unit_label = "m"
-    else:
-        unit_label = unit_name or "projected units"
-
-    # --------------------------------------------------------
-    # Calculate exact raster extent from pixel centres
-    # --------------------------------------------------------
-    dx = float(np.median(np.diff(x)))
-    dy = float(np.median(np.diff(y)))
-
-    if np.isclose(dx, 0) or np.isclose(dy, 0):
-        raise ValueError("The x/y coordinate spacing cannot be zero.")
-
-    x_range = sorted([
-        float(x[0] - dx / 2),
-        float(x[-1] + dx / 2),
-    ])
-
-    y_range = sorted([
-        float(y[0] - dy / 2),
-        float(y[-1] + dy / 2),
-    ])
-
-    # --------------------------------------------------------
-    # Parameter helpers
-    # --------------------------------------------------------
-    def option_for(option, name, fallback):
-        if isinstance(option, dict):
-            return option.get(name, fallback)
-        return fallback if option is None else option
-
-    def display_limits(name, valid):
-        if robust:
-            default_low, default_high = np.percentile(valid, [2, 98])
-        else:
-            default_low = np.min(valid)
-            default_high = np.max(valid)
-
-        low = float(option_for(vmin, name, default_low))
-        high = float(option_for(vmax, name, default_high))
-
-        if not np.isfinite(low) or not np.isfinite(high):
-            raise ValueError(
-                f"Non-finite display limits for {name}: {low}, {high}"
-            )
-
-        if low >= high:
-            if np.isclose(low, high):
-                high = low + 1e-6
-            else:
-                raise ValueError(
-                    f"Invalid display limits for {name}: {low}, {high}"
-                )
-
-        return low, high
-
-    # --------------------------------------------------------
-    # Create subplot grid
-    # --------------------------------------------------------
-    ncols = min(int(cols), len(names))
-    nrows = (len(names) + ncols - 1) // ncols
-
-    titles = [
-        f"{name} — {INDEX_INFO[name]['full_name']}"
-        for name in names
-    ]
-
-    titles.extend([""] * (nrows * ncols - len(titles)))
-
-    fig = make_subplots(
-        rows=nrows,
-        cols=ncols,
-        subplot_titles=titles,
-        horizontal_spacing=0.10,
-        vertical_spacing=0.12,
-    )
-
-    # --------------------------------------------------------
-    # Add index maps
-    # --------------------------------------------------------
-    for position, name in enumerate(names):
-        row = position // ncols + 1
-        col = position % ncols + 1
-
-        array = np.asarray(
-            ds[name].transpose("y", "x").values,
-            dtype=np.float32,
-        )
-
-        if array.shape != (rows_px, cols_px):
-            raise ValueError(
-                f"{name} has shape {array.shape}; expected "
-                f"{(rows_px, cols_px)}."
-            )
-
-        valid = array[np.isfinite(array)]
-
-        if valid.size == 0:
-            continue
-
-        low, high = display_limits(name, valid)
-
-        scale = option_for(
-            colorscale,
-            name,
-            INDEX_CMAPS.get(name, "Viridis"),
-        )
-
-        # Plotly subplot axis identifier
-        axis_number = position + 1
-        axis_suffix = "" if axis_number == 1 else str(axis_number)
-
-        fig.add_trace(
-            go.Heatmap(
-                x=x,
-                y=y,
-                z=array,
-                colorscale=scale,
-                zmin=low,
-                zmax=high,
-                zsmooth=False,
-                showscale=show_colorbars,
-                colorbar=(
-                    dict(
-                        title=name,
-                        thickness=12,
-                    )
-                    if show_colorbars
-                    else None
-                ),
-                hovertemplate=(
-                    f"<b>{name}</b><br>"
-                    f"Easting: %{{x:,.3f}} {unit_label}<br>"
-                    f"Northing: %{{y:,.3f}} {unit_label}<br>"
-                    "Value: %{z:.4f}"
-                    "<extra></extra>"
-                ),
-                name="",
-            ),
-            row=row,
-            col=col,
-        )
-
-        # Projected x axis
-        fig.update_xaxes(
-            title_text=(
-                f"Easting ({unit_label})"
-                if row == nrows
-                else None
-            ),
-            range=x_range,
-            tickformat=",.0f",
-            constrain="domain",
-            row=row,
-            col=col,
-        )
-
-        # Projected y axis with equal physical scale
-        fig.update_yaxes(
-            title_text=(
-                f"Northing ({unit_label})"
-                if col == 1
-                else None
-            ),
-            range=y_range,
-            tickformat=",.0f",
-            scaleanchor=f"x{axis_suffix}",
-            scaleratio=1,
-            constrain="domain",
-            row=row,
-            col=col,
-        )
-
-    # --------------------------------------------------------
-    # Layout
-    # --------------------------------------------------------
-    filename = ds.attrs.get(
-        "filename",
-        "MicaSense RedEdge-P Dual",
-    )
-
-    fig.update_layout(
-        title=dict(
-            text=(
-                f"Workshop Spectral Indices — {filename}<br>"
-                f"<sup>{crs_name} ({crs_id})</sup>"
-            ),
-            x=0.5,
-            xanchor="center",
-        ),
-        template="plotly_white",
-        width=max(750, width_per_panel * ncols),
-        height=max(500, height_per_panel * nrows + 100),
-        showlegend=False,
-        margin=dict(
-            l=90,
-            r=50,
-            t=120,
-            b=80,
-        ),
-    )
-
-    # --------------------------------------------------------
-    # Optional standalone HTML export
-    # --------------------------------------------------------
-    if save_path is not None:
-        path = Path(save_path)
-
-        if path.suffix.lower() != ".html":
-            raise ValueError(
-                "plot_indices save_path must end in '.html'."
-            )
-
-        path.parent.mkdir(parents=True, exist_ok=True)
-
-        fig.write_html(
-            path,
-            include_plotlyjs=True,
-        )
-
-        print(f"Saved: {path}")
-
-    if show:
-        fig.show(
-            config={
-                "scrollZoom": True,
-                "displaylogo": False,
-            }
-        )
-
-    return fig
-    
-    
-    
-def plot_indices2(
-    ds,
-    indices=None,
-    colorscale=None,
-    cols=2,
-    robust=True,
-    vmin=None,
-    vmax=None,
-    show_colorbars=False,
-    width_per_panel=430,
-    height_per_panel=390,
-    save_path=None,
-    show=True,
-):
-    """
-    Plot spectral indices interactively with Plotly using the native
-    projected CRS.
-
-    Axis labels use compact offset notation, for example:
-
-        Easting ticks:  5, 10, 15, 20
-        Axis offset:    +4.618e5
-
-    Full projected coordinates are retained in the hover information.
-    """
-
-    names = _resolve_indices(ds, indices)
-
-    if cols < 1:
-        raise ValueError("cols must be at least 1.")
-
-    # ========================================================
-    # Projected coordinates and CRS
-    # ========================================================
-    x = np.asarray(ds["x"].values, dtype=np.float64)
-    y = np.asarray(ds["y"].values, dtype=np.float64)
-
-    rows_px = ds.sizes["y"]
-    cols_px = ds.sizes["x"]
-
-    if x.ndim != 1 or y.ndim != 1:
-        raise ValueError("The x and y coordinates must be one-dimensional.")
-
-    if x.size != cols_px or y.size != rows_px:
-        raise ValueError(
-            "The x/y coordinate lengths do not match the raster dimensions."
-        )
-
-    if x.size < 2 or y.size < 2:
-        raise ValueError("At least two x and y coordinates are required.")
-
-    source_crs = CRS.from_user_input(_dataset_crs(ds))
-
-    if not source_crs.is_projected:
-        raise ValueError(
-            "Expected a projected CRS, but found "
-            f"{source_crs.to_string()}."
-        )
-
-    crs_name = source_crs.name
-    crs_id = source_crs.to_string()
-
-    unit_name = (
-        source_crs.axis_info[0].unit_name
-        if source_crs.axis_info
-        else "projected unit"
-    )
-
-    if unit_name.lower() in {"metre", "meter", "metres", "meters"}:
-        unit_label = "m"
-    else:
-        unit_label = unit_name
-
-    # ========================================================
-    # Exact raster extent from pixel centres
-    # ========================================================
-    dx = float(np.median(np.diff(x)))
-    dy = float(np.median(np.diff(y)))
-
-    if np.isclose(dx, 0) or np.isclose(dy, 0):
-        raise ValueError("The x/y coordinate spacing cannot be zero.")
-
-    x_range = sorted([
-        float(x[0] - dx / 2),
-        float(x[-1] + dx / 2),
-    ])
-
-    y_range = sorted([
-        float(y[0] - dy / 2),
-        float(y[-1] + dy / 2),
-    ])
-
-    # ========================================================
-    # Compact projected-axis formatting
-    # ========================================================
-    def calculate_axis_offset(axis_range):
-        """Calculate a Matplotlib-style additive coordinate offset."""
-
-        lower, upper = sorted(axis_range)
-        span = upper - lower
-
-        if not np.isfinite(span) or span <= 0:
-            return 0.0
-
-        centre = (lower + upper) / 2
-
-        # Use offset notation only when coordinates are much larger
-        # than the displayed spatial extent.
-        if abs(centre) < 100 * span:
-            return 0.0
-
-        offset_step = 10 ** (np.floor(np.log10(span)) + 1)
-        return float(np.floor(lower / offset_step) * offset_step)
-
-    def nice_tick_values(axis_range, target_ticks=6):
-        """Calculate approximately evenly spaced, rounded tick positions."""
-
-        lower, upper = sorted(axis_range)
-        span = upper - lower
-
-        if not np.isfinite(span) or span <= 0:
-            return np.array([lower])
-
-        raw_step = span / max(target_ticks - 1, 1)
-        magnitude = 10 ** np.floor(np.log10(raw_step))
-        fraction = raw_step / magnitude
-
-        if fraction <= 1:
-            nice_fraction = 1
-        elif fraction <= 2:
-            nice_fraction = 2
-        elif fraction <= 2.5:
-            nice_fraction = 2.5
-        elif fraction <= 5:
-            nice_fraction = 5
-        else:
-            nice_fraction = 10
-
-        step = nice_fraction * magnitude
-
-        first = np.ceil(lower / step) * step
-        last = np.floor(upper / step) * step
-
-        ticks = np.arange(
-            first,
-            last + step * 0.5,
-            step,
-        )
-
-        return ticks
-
-    def format_local_tick(value, offset, ticks):
-        """Format tick value after subtracting the displayed offset."""
-
-        local_value = value - offset
-
-        if np.isclose(local_value, 0):
-            local_value = 0.0
-
-        if len(ticks) > 1:
-            step = abs(float(ticks[1] - ticks[0]))
-        else:
-            step = 1.0
-
-        if step >= 1:
-            decimals = 0
-        else:
-            decimals = max(
-                0,
-                int(np.ceil(-np.log10(step))),
-            )
-
-        return f"{local_value:.{decimals}f}"
-
-    def format_offset(offset):
-        """Format offsets as +4.618e5 or +6.2375e6."""
-
-        if np.isclose(offset, 0):
-            return ""
-
-        sign = "+" if offset > 0 else "−"
-        absolute = abs(offset)
-
-        scientific = f"{absolute:.10e}"
-        mantissa, exponent = scientific.split("e")
-
-        mantissa = mantissa.rstrip("0").rstrip(".")
-        exponent = int(exponent)
-
-        return f"{sign}{mantissa}e{exponent}"
-
-    x_offset = calculate_axis_offset(x_range)
-    y_offset = calculate_axis_offset(y_range)
-
-    x_ticks = nice_tick_values(x_range)
-    y_ticks = nice_tick_values(y_range)
-
-    x_tick_labels = [
-        format_local_tick(value, x_offset, x_ticks)
-        for value in x_ticks
-    ]
-
-    y_tick_labels = [
-        format_local_tick(value, y_offset, y_ticks)
-        for value in y_ticks
-    ]
-
-    x_offset_text = format_offset(x_offset)
-    y_offset_text = format_offset(y_offset)
-
-    # ========================================================
-    # Display-option helpers
-    # ========================================================
-    def option_for(option, name, fallback):
-        if isinstance(option, dict):
-            return option.get(name, fallback)
-
-        return fallback if option is None else option
-
-    def display_limits(name, valid):
-        if robust:
-            default_low, default_high = np.percentile(
-                valid,
-                [2, 98],
-            )
-        else:
-            default_low = np.min(valid)
-            default_high = np.max(valid)
-
-        low = float(option_for(vmin, name, default_low))
-        high = float(option_for(vmax, name, default_high))
-
-        if not np.isfinite(low) or not np.isfinite(high):
-            raise ValueError(
-                f"Non-finite display limits for {name}: "
-                f"{low}, {high}"
-            )
-
-        if low >= high:
-            if np.isclose(low, high):
-                high = low + 1e-6
-            else:
-                raise ValueError(
-                    f"Invalid display limits for {name}: "
-                    f"{low}, {high}"
-                )
-
-        return low, high
-
-    # ========================================================
-    # Subplot layout
-    # ========================================================
-    ncols = min(int(cols), len(names))
-    nrows = (len(names) + ncols - 1) // ncols
-
-    titles = [
-        f"<b>{name}</b> — {INDEX_INFO[name]['full_name']}"
-        for name in names
-    ]
-
-    titles.extend([""] * (nrows * ncols - len(titles)))
-
-    fig = make_subplots(
-        rows=nrows,
-        cols=ncols,
-        subplot_titles=titles,
-        horizontal_spacing=0.12,
-        vertical_spacing=0.17,
-    )
-
-    # ========================================================
-    # Add index maps
-    # ========================================================
-    for position, name in enumerate(names):
-        row = position // ncols + 1
-        col = position % ncols + 1
-
-        array = np.asarray(
-            ds[name].transpose("y", "x").values,
-            dtype=np.float32,
-        )
-
-        if array.shape != (rows_px, cols_px):
-            raise ValueError(
-                f"{name} has shape {array.shape}; "
-                f"expected {(rows_px, cols_px)}."
-            )
-
-        valid = array[np.isfinite(array)]
-
-        if valid.size == 0:
-            continue
-
-        low, high = display_limits(name, valid)
-
-        scale = option_for(
-            colorscale,
-            name,
-            INDEX_CMAPS.get(name, "Viridis"),
-        )
-
-        axis_number = position + 1
-        axis_suffix = "" if axis_number == 1 else str(axis_number)
-
-        x_axis_reference = (
-            "x domain"
-            if axis_number == 1
-            else f"x{axis_number} domain"
-        )
-
-        y_axis_reference = (
-            "y domain"
-            if axis_number == 1
-            else f"y{axis_number} domain"
-        )
-
-        fig.add_trace(
-            go.Heatmap(
-                x=x,
-                y=y,
-                z=array,
-                colorscale=scale,
-                zmin=low,
-                zmax=high,
-                zsmooth=False,
-                showscale=show_colorbars,
-                colorbar=(
-                    dict(
-                        title=name,
-                        thickness=12,
-                    )
-                    if show_colorbars
-                    else None
-                ),
-                hovertemplate=(
-                    f"<b>{name}</b><br>"
-                    f"Easting: %{{x:,.3f}} {unit_label}<br>"
-                    f"Northing: %{{y:,.3f}} {unit_label}<br>"
-                    "Value: %{z:.4f}"
-                    "<extra></extra>"
-                ),
-                name="",
-            ),
-            row=row,
-            col=col,
-        )
-
-        # Compact Easting tick labels
-        fig.update_xaxes(
-            title_text=(
-                f"Easting ({unit_label})"
-                if row == nrows
-                else None
-            ),
-            range=x_range,
-            tickmode="array",
-            tickvals=x_ticks,
-            ticktext=x_tick_labels,
-            constrain="domain",
-            row=row,
-            col=col,
-        )
-
-        # Compact Northing tick labels
-        fig.update_yaxes(
-            title_text=(
-                f"Northing ({unit_label})"
-                if col == 1
-                else None
-            ),
-            range=y_range,
-            tickmode="array",
-            tickvals=y_ticks,
-            ticktext=y_tick_labels,
-            scaleanchor=f"x{axis_suffix}",
-            scaleratio=1,
-            constrain="domain",
-            row=row,
-            col=col,
-        )
-
-        # Northing offset at the upper-left
-        if y_offset_text:
-            fig.add_annotation(
-                x=0,
-                y=1.01,
-                xref=x_axis_reference,
-                yref=y_axis_reference,
-                text=y_offset_text,
-                showarrow=False,
-                xanchor="left",
-                yanchor="bottom",
-                font=dict(
-                    size=10,
-                    color="#333333",
-                ),
-            )
-
-        # Easting offset at the lower-right
-        if x_offset_text:
-            fig.add_annotation(
-                x=1,
-                y=-0.06,
-                xref=x_axis_reference,
-                yref=y_axis_reference,
-                text=x_offset_text,
-                showarrow=False,
-                xanchor="right",
-                yanchor="top",
-                font=dict(
-                    size=10,
-                    color="#333333",
-                ),
-            )
-
-    # ========================================================
-    # Figure layout
-    # ========================================================
-    filename = ds.attrs.get(
-        "filename",
-        "MicaSense RedEdge-P Dual",
-    )
-
-    fig.update_layout(
-        title=dict(
-            text=(
-                f"Workshop Spectral Indices — {filename}<br>"
-                f"<sup>{crs_name} ({crs_id})</sup>"
-            ),
-            x=0.5,
-            xanchor="center",
-        ),
-        template="plotly_white",
-        width=max(750, width_per_panel * ncols),
-        height=max(
-            500,
-            height_per_panel * nrows + 120,
-        ),
-        showlegend=False,
-        margin=dict(
-            l=90,
-            r=50,
-            t=125,
-            b=90,
-        ),
-    )
-
-    # ========================================================
-    # Optional HTML export
-    # ========================================================
-    if save_path is not None:
-        path = Path(save_path)
-
-        if path.suffix.lower() != ".html":
-            raise ValueError(
-                "plot_indices save_path must end in '.html'."
-            )
-
-        path.parent.mkdir(
-            parents=True,
-            exist_ok=True,
-        )
-
-        fig.write_html(
-            path,
-            include_plotlyjs=True,
-        )
-
-        print(f"Saved: {path}")
-
-    if show:
-        fig.show(
-            config={
-                "scrollZoom": True,
-                "displaylogo": False,
-            }
-        )
-
-    return fig
 
 
 # ---------------------------------------------------------------------------
@@ -2095,8 +1222,6 @@ def plot_raster_grid(
     return fig
 
 
-# Override the earlier notebook-compatible definition with the shared generic
-# projected implementation. Existing notebook calls keep the same API.
 def plot_indices(
     ds,
     indices=None,
