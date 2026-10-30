@@ -17,6 +17,7 @@ Each step is tagged:
 | `configure.sh` | Applies the hub settings with `tljh-config`: login, per-user limits, idle culler, JupyterLab as default, and HTTPS. Settings are environment variables, documented at the top of the file. |
 | `smoke_test.py` | Imports every package, reads the imagery from the STAC catalogue, computes indices and writes GeoTIFFs. Prints OK/FAIL per check. Passes locally under pixi; it reads 65 MB in about 13 s. |
 | `nbgitpuller_link.py` | Prints the links you hand to attendees. |
+| `Caddyfile`, `setup-caddy.sh` | Caddy in front of the hub: HTTPS for `dronescape.earth`, the `/aeo-workshop-notebooks` short link, and `stac.dronescape.earth` → the STAC catalogue. |
 
 All scripts can be re-run safely.
 
@@ -136,45 +137,47 @@ sudo tljh-config reload
 
 Hub admins get `sudo` on the VM, so only make people you trust admins.
 
-### 8. [YOU] Create the DNS name
+### 8. [YOU] Point dronescape.earth at the VM
 
-Dashboard → *Project → DNS → Zones*. Your zone is listed, for example `myproject.cloud.edu.au.` → *Create Record Set*:
+`dronescape.earth` is registered with Namecheap and uses its DNS. In Namecheap: *Domain List → dronescape.earth → Manage → Advanced DNS → Add New Record*, twice:
 
-- Type **A**, Name `aeo-hub.myproject.cloud.edu.au.` (keep the trailing dot), Record = the VM's public IP.
+| Type | Host | Value | TTL |
+| --- | --- | --- | --- |
+| A Record | `@` | the VM's public IP | Automatic (or 5 min) |
+| A Record | `stac` | the VM's public IP | Automatic (or 5 min) |
 
-([Nectar tutorial: create a record set](https://tutorials.rc.nectar.org.au/dns/05-create-recordset)). Or from the CLI:
+Remove any parking-page records Namecheap added for `@` (a *URL Redirect* or a CNAME for `www`/`@`). Check from your laptop: `nslookup dronescape.earth` and `nslookup stac.dronescape.earth` should both return the VM's IP.
 
-```bash
-openstack recordset create myproject.cloud.edu.au. aeo-hub --type A --record <ip>
-```
+If the VM's IP ever changes (a new VM, or a resize that changes it), update these two records. Caddy then gets new certificates by itself.
 
-Check it from your laptop: `nslookup aeo-hub.myproject.cloud.edu.au`.
+### 9. [DONE] Turn on HTTPS with Caddy
 
-If you'd rather use a UTAS name, ask UTAS IT for an A record pointing at the IP.
+`hub/Caddyfile` makes Caddy (as used for naturescan) serve:
 
-### 9. [DONE] Turn on HTTPS
+- `https://dronescape.earth`: the hub.
+- `https://dronescape.earth/aeo-workshop-notebooks`: the short link for attendees. It redirects to the nbgitpuller link, which logs them in, pulls the notebooks and opens JupyterLab.
+- `https://stac.dronescape.earth`: the STAC catalogue, passed through from Nectar object storage. `/` goes to `catalog.json`.
 
-Once the name resolves:
-
-```bash
-ssh ubuntu@<ip>
-cd /opt/aeo-workshop-notebooks
-sudo HTTPS_DOMAIN=aeo-hub.myproject.cloud.edu.au HTTPS_EMAIL=<your-email> \
-     bash hub/configure.sh
-```
-
-The passwords stay as they are. TLJH's Traefik proxy then gets a Let's Encrypt certificate and renews it automatically ([TLJH HTTPS](https://tljh.jupyter.org/en/latest/howto/admin/https.html)). After a minute, `https://aeo-hub.myproject.cloud.edu.au` should load with a padlock.
-
-### 10. [DONE] Make the attendee link
-
-On your laptop:
+Once both names resolve, on the VM:
 
 ```bash
-python hub/nbgitpuller_link.py https://aeo-hub.myproject.cloud.edu.au \
-    https://github.com/UTAS-TerraLuma/aeo-workshop-notebooks
+cd /opt/aeo-workshop-notebooks && sudo git pull
+sudo bash hub/setup-caddy.sh
 ```
 
-Hand out the first link (*Workshop folder*): put it in slides, as a QR code, or shorten it with a URL shortener. The per-chapter links open a specific notebook.
+It moves TLJH from ports 80/443 to port 8000 (the security group keeps 8000 closed to the outside), installs Caddy and starts it. After a minute, all three addresses above should load with a padlock. Caddy log: `sudo journalctl -u caddy -f`.
+
+Don't also use `configure.sh`'s `HTTPS_DOMAIN` option: Caddy owns HTTPS now, and `configure.sh` refuses if you try.
+
+The notebooks still read the imagery straight from the object-store URL, not through `stac.dronescape.earth`. That way they keep working after this VM is gone. `stac.dronescape.earth` only works while this VM is running; for a permanent name, move the `stac.dronescape.earth` block of the Caddyfile to a small long-lived VM (or the naturescan server).
+
+### 10. [DONE] The attendee link
+
+Hand out **`https://dronescape.earth/aeo-workshop-notebooks`**. For links that open a specific chapter, run on your laptop:
+
+```bash
+python hub/nbgitpuller_link.py https://dronescape.earth     https://github.com/UTAS-TerraLuma/aeo-workshop-notebooks
+```
 
 ### 11. [YOU] Test as an attendee
 
@@ -212,7 +215,7 @@ Any exit status other than 0 means a chapter failed. Read `/tmp/nbtestN/log.txt`
 
 ### 13. [YOU] Put the link and password on a slide
 
-Show the link (or a QR code) and the workshop password. Tell attendees: "Log in with your first name, in lower case, and this password. Use the same name every time, or you'll get an empty folder."
+Show `https://dronescape.earth/aeo-workshop-notebooks` (or a QR code) and the workshop password. Tell attendees: "Log in with your first name, in lower case, and this password. Use the same name every time, or you'll get an empty folder."
 
 ---
 
@@ -264,10 +267,10 @@ sudo journalctl -u jupyter-user07 -f      # one attendee's server log
 | --- | --- |
 | Log at `/var/log/aeo-hub-setup.log` stops early or missing | `sudo less /var/log/cloud-init-output.log`. Fix the cause (for example, `CHANGE_ME` left in, or repo not public), then `sudo bash /root/aeo-hub-setup.sh`. It's safe to re-run. |
 | `Fill in the CHANGE_ME values` in the log | Edit `/root/aeo-hub-setup.sh` on the VM, then re-run it as above. |
-| Can't reach `http://<ip>` at all | Security group has 80/443; the instance has a public IP (or floating IP); `sudo systemctl status jupyterhub traefik`. |
+| Can't reach `http://<ip>` at all | Security group has 80/443; the instance has a public IP (or floating IP); `sudo systemctl status caddy jupyterhub traefik`. |
 | "Spawn failed" / server won't start | `sudo journalctl -u jupyterhub -n 100`. If the user environment broke, re-run `sudo bash /opt/aeo-workshop-notebooks/hub/install-env.sh`. Its last lines check that `jupyterhub-singleuser` still works. |
 | `load_data()` fails / STAC errors | `curl -I https://object-store.rc.nectar.org.au/v1/AUTH_4df2f67c2eed48a2aaeeed008a4bf0de/aeo2026-workshop/collection.json` from the VM. Should be `200`. If not, check [Nectar status](https://status.rc.nectar.org.au). |
-| HTTPS doesn't come up | Name resolves to the VM (`getent hosts <name>` on the VM); ports 80/443 open; `sudo journalctl -u traefik -n 100`. While experimenting, `sudo tljh-config set https.letsencrypt.staging true` avoids Let's Encrypt rate limits. Set it back to `false` for the real certificate. |
+| HTTPS doesn't come up | Both names resolve to the VM (`getent hosts dronescape.earth stac.dronescape.earth` on the VM); ports 80/443 open; `sudo journalctl -u caddy -n 100`. |
 | Login says invalid username/password | Wrong workshop password (`sudo cat /root/workshop-password.txt`). An admin username only works with the admin password. |
 | Everything slow | `htop`: if the CPU is pegged, lower `CPU_LIMIT` or resize. If RAM is nearly full, ask people to shut down idle kernels. |
 | Need a package added | Add it to `pixi.toml` (and the other env files) and push. Then on the VM: `cd /opt/aeo-workshop-notebooks && sudo git pull && sudo bash hub/install-env.sh`. Attendees restart their kernel. |

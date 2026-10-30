@@ -1,0 +1,25 @@
+# Caddy in front of the workshop hub. Caddy gets and renews the HTTPS
+# certificates; TLJH listens on localhost:8000 behind it (see setup-caddy.sh).
+#
+# DNS (A records, both pointing at this VM's IP):
+#   dronescape.earth
+#   stac.dronescape.earth
+
+dronescape.earth {
+	# Short link for attendees: logs in, pulls the notebooks, opens JupyterLab
+	redir /aeo-workshop-notebooks* /hub/user-redirect/git-pull?repo=https%3A%2F%2Fgithub.com%2FUTAS-TerraLuma%2Faeo-workshop-notebooks&branch=main&urlpath=lab%2Ftree%2Faeo-workshop-notebooks 302
+
+	# Everything else is the JupyterHub
+	reverse_proxy localhost:8000
+}
+
+# Friendly name for the STAC catalogue on Nectar object storage.
+# The catalogue's links are relative, so it works unchanged at this address.
+stac.dronescape.earth {
+	redir / /catalog.json 302
+
+	rewrite * /v1/AUTH_4df2f67c2eed48a2aaeeed008a4bf0de/aeo2026-workshop{uri}
+	reverse_proxy https://object-store.rc.nectar.org.au {
+		header_up Host {upstream_hostport}
+	}
+}

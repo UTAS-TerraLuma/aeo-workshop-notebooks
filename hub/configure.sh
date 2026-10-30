@@ -79,6 +79,10 @@ cfg set services.cull.enabled true
 cfg set services.cull.timeout "$CULL_TIMEOUT"
 cfg set services.cull.every 300
 
+if [ -n "$HTTPS_DOMAIN" ] && [ -f /etc/caddy/Caddyfile ]; then
+    echo "Caddy handles HTTPS on this hub (hub/setup-caddy.sh); leave HTTPS_DOMAIN unset." >&2
+    exit 1
+fi
 if [ -n "$HTTPS_DOMAIN" ] && [ -n "$HTTPS_EMAIL" ]; then
     echo "== HTTPS via Let's Encrypt for $HTTPS_DOMAIN"
     if ! getent hosts "$HTTPS_DOMAIN" >/dev/null; then
