@@ -137,28 +137,31 @@ sudo tljh-config reload
 
 Hub admins get `sudo` on the VM, so only make people you trust admins.
 
-### 8. [YOU] Point dronescape.earth at the VM
+### 8. [YOU] Point dronescape.io and dronescape.earth at the VM
 
-`dronescape.earth` is registered with Namecheap and uses its DNS. In Namecheap: *Domain List → dronescape.earth → Manage → Advanced DNS → Add New Record*, twice:
+Both domains are registered with Namecheap and use its DNS. **Hand out `dronescape.io`**: the UTAS network's web filter resets HTTPS connections to `dronescape.earth` (seen 30 Oct 2026), but not to `dronescape.io`. If the workshop is on UTAS Wi-Fi, ask UTAS IT to allowlist `dronescape.earth` too, or just don't use it.
+
+In Namecheap: *Domain List → <domain> → Manage → Advanced DNS → Add New Record*. For each domain:
 
 | Type | Host | Value | TTL |
 | --- | --- | --- | --- |
 | A Record | `@` | the VM's public IP | Automatic (or 5 min) |
 | A Record | `stac` | the VM's public IP | Automatic (or 5 min) |
+| A Record | `www` | the VM's public IP (`dronescape.io` only; it redirects to `dronescape.io`) | Automatic (or 5 min) |
 
-Remove any parking-page records Namecheap added for `@` (a *URL Redirect* or a CNAME for `www`/`@`). Check from your laptop: `nslookup dronescape.earth` and `nslookup stac.dronescape.earth` should both return the VM's IP.
+Remove any parking-page records Namecheap added for `@` (a *URL Redirect* or a CNAME for `www`/`@`). Check from your laptop: `nslookup dronescape.io`, `nslookup stac.dronescape.io` (and the `.earth` names) should all return the VM's IP.
 
-If the VM's IP ever changes (a new VM, or a resize that changes it), update these two records. Caddy then gets new certificates by itself.
+If the VM's IP ever changes (a new VM, or a resize that changes it), update these records. Caddy then gets new certificates by itself.
 
 ### 9. [DONE] Turn on HTTPS with Caddy
 
-`hub/Caddyfile` makes Caddy (as used for naturescan) serve:
+`hub/Caddyfile` makes Caddy (as used for naturescan) serve, on both `dronescape.io` and `dronescape.earth`:
 
-- `https://dronescape.earth`: the hub.
-- `https://dronescape.earth/aeo-workshop-notebooks`: the short link for attendees. It redirects to the nbgitpuller link, which logs them in, pulls the notebooks and opens JupyterLab.
-- `https://stac.dronescape.earth`: the STAC catalogue, passed through from Nectar object storage. `/` goes to `catalog.json`.
+- `https://dronescape.io`: the hub.
+- `https://dronescape.io/aeo-workshop-notebooks`: the short link for attendees. It redirects to the nbgitpuller link, which logs them in, pulls the notebooks and opens JupyterLab.
+- `https://stac.dronescape.io`: the STAC catalogue, passed through from Nectar object storage. `/` goes to `catalog.json`.
 
-Once both names resolve, on the VM:
+Once the names resolve, on the VM (re-run it after any Caddyfile change):
 
 ```bash
 cd /opt/aeo-workshop-notebooks && sudo git pull
@@ -173,10 +176,10 @@ The notebooks still read the imagery straight from the object-store URL, not thr
 
 ### 10. [DONE] The attendee link
 
-Hand out **`https://dronescape.earth/aeo-workshop-notebooks`**. For links that open a specific chapter, run on your laptop:
+Hand out **`https://dronescape.io/aeo-workshop-notebooks`**. For links that open a specific chapter, run on your laptop:
 
 ```bash
-python hub/nbgitpuller_link.py https://dronescape.earth     https://github.com/UTAS-TerraLuma/aeo-workshop-notebooks
+python hub/nbgitpuller_link.py https://dronescape.io https://github.com/UTAS-TerraLuma/aeo-workshop-notebooks
 ```
 
 ### 11. [YOU] Test as an attendee
@@ -215,7 +218,7 @@ Any exit status other than 0 means a chapter failed. Read `/tmp/nbtestN/log.txt`
 
 ### 13. [YOU] Put the link and password on a slide
 
-Show `https://dronescape.earth/aeo-workshop-notebooks` (or a QR code) and the workshop password. Tell attendees: "Log in with your first name, in lower case, and this password. Use the same name every time, or you'll get an empty folder."
+Show `https://dronescape.io/aeo-workshop-notebooks` (or a QR code) and the workshop password. Tell attendees: "Log in with your first name, in lower case, and this password. Use the same name every time, or you'll get an empty folder."
 
 ---
 
