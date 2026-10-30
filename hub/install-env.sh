@@ -64,13 +64,19 @@ fi
 # conda needs a HOME (cloud-init runs without one)
 export HOME="${HOME:-/root}"
 
+# Pin a current sqlite: otherwise the solver can keep TLJH's older packages by
+# picking an ancient `sqlite` build that overwrites libsqlite3.so and breaks
+# Python's sqlite3 module (and with it jupyter_server).
 # shellcheck disable=SC2086  # word-splitting the package list is intended
-"$USER_ENV/bin/mamba" install --yes --channel conda-forge $PACKAGES
+"$USER_ENV/bin/mamba" install --yes --channel conda-forge $PACKAGES "sqlite>=3.45" "libsqlite>=3.45"
+# Put libsqlite's files back in case an old sqlite build had overwritten or,
+# on its removal, deleted them.
+"$USER_ENV/bin/mamba" install --yes --channel conda-forge --force-reinstall libsqlite
 
 # The hub can't start anyone's server if conda broke the Jupyter pieces that
 # TLJH installed with pip, so check them before declaring success.
 echo "Checking the user environment..."
-"$USER_ENV/bin/python" -c "import jupyterhub, jupyterlab, nbgitpuller, rasterio, rioxarray; print('  imports OK, GDAL', rasterio.__gdal_version__)"
+"$USER_ENV/bin/python" -c "import sqlite3, jupyter_server.serverapp, jupyterhub, jupyterlab, nbgitpuller, rasterio, rioxarray; print('  imports OK, SQLite', sqlite3.sqlite_version, 'GDAL', rasterio.__gdal_version__)"
 [ -x "$USER_ENV/bin/jupyterhub-singleuser" ] || { echo "  FAIL: jupyterhub-singleuser missing" >&2; exit 1; }
 echo "  jupyterhub-singleuser OK"
 echo "Done."
