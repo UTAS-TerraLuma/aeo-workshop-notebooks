@@ -43,7 +43,7 @@ write_files:
       # Your hub admin login (lower case, no spaces). Setup generates the
       # admin and workshop passwords; read them over ssh afterwards with
       #   sudo cat /root/admin-password.txt /root/workshop-password.txt
-      ADMIN_USER="CHANGE_ME_admin_username"
+      ADMIN_USER="jgregory"
       # Public git URL of this repo (must be pushed before launching)
       REPO_URL="https://github.com/UTAS-TerraLuma/aeo-workshop-notebooks.git"
       REPO_BRANCH="main"
