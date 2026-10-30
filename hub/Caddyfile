@@ -1,11 +1,14 @@
 # Caddy in front of the workshop hub. Caddy gets and renews the HTTPS
 # certificates; TLJH listens on localhost:8000 behind it (see setup-caddy.sh).
 #
-# DNS (A records, both pointing at this VM's IP):
-#   dronescape.earth
-#   stac.dronescape.earth
+# DNS (A records, all pointing at this VM's IP):
+#   dronescape.earth   stac.dronescape.earth
+#   dronescape.io      stac.dronescape.io      www.dronescape.io
+#
+# dronescape.io is the one to hand out: UTAS's web filter blocks HTTPS to
+# dronescape.earth (seen 2026-10-30), but not to dronescape.io.
 
-dronescape.earth {
+dronescape.io, dronescape.earth {
 	# Short link for attendees: logs in, pulls the notebooks, opens JupyterLab
 	redir /aeo-workshop-notebooks* /hub/user-redirect/git-pull?repo=https%3A%2F%2Fgithub.com%2FUTAS-TerraLuma%2Faeo-workshop-notebooks&branch=main&urlpath=lab%2Ftree%2Faeo-workshop-notebooks 302
 
@@ -15,11 +18,15 @@ dronescape.earth {
 
 # Friendly name for the STAC catalogue on Nectar object storage.
 # The catalogue's links are relative, so it works unchanged at this address.
-stac.dronescape.earth {
+stac.dronescape.io, stac.dronescape.earth {
 	redir / /catalog.json 302
 
 	rewrite * /v1/AUTH_4df2f67c2eed48a2aaeeed008a4bf0de/aeo2026-workshop{uri}
 	reverse_proxy https://object-store.rc.nectar.org.au {
 		header_up Host {upstream_hostport}
 	}
+}
+
+www.dronescape.io {
+	redir https://dronescape.io{uri} 308
 }
