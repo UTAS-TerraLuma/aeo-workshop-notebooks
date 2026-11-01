@@ -1,0 +1,33 @@
+// GitHub Codespaces setup: the backup if the workshop hub is unavailable.
+// See "GitHub Codespaces" in the README.
+{
+  "name": "AEO workshop",
+  "build": { "dockerfile": "Dockerfile" },
+
+  // Builds the pixi environment from pixi.lock. updateContentCommand also runs
+  // during prebuilds, so a prebuilt codespace starts with it already installed.
+  // --locked stops with an error if pixi.lock is out of date with pixi.toml.
+  "updateContentCommand": "pixi install --locked",
+
+  // Starts JupyterLab each time the editor attaches and opens it in a new tab.
+  // No token: the forwarded port is private to the codespace's owner.
+  // port_retries=0 makes a second attach exit instead of starting another server.
+  "postAttachCommand": "pixi run jupyter lab --no-browser --port=8888 --ServerApp.port_retries=0 --IdentityProvider.token='' --ServerApp.allow_origin='*'",
+  "forwardPorts": [8888],
+  "portsAttributes": {
+    "8888": { "label": "JupyterLab", "onAutoForward": "openBrowser" }
+  },
+
+  // One chapter's kernel uses up to ~1.5 GB; the default 2-core machine has 8 GB
+  "hostRequirements": { "memory": "8gb" },
+
+  "customizations": {
+    "vscode": {
+      // For running the notebooks in the editor instead of JupyterLab
+      "extensions": ["ms-python.python", "ms-toolsai.jupyter"],
+      "settings": {
+        "python.defaultInterpreterPath": "${containerWorkspaceFolder}/.pixi/envs/default/bin/python"
+      }
+    }
+  }
+}

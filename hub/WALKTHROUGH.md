@@ -279,7 +279,9 @@ sudo journalctl -u jupyter-user07 -f      # one attendee's server log
 | Need a package added | Add it to `pixi.toml` (and the other env files) and push. Then on the VM: `cd /opt/aeo-workshop-notebooks && sudo git pull && sudo bash hub/install-env.sh`. Attendees restart their kernel. |
 | Notebooks updated on GitHub | Attendees click the link again. nbgitpuller merges and keeps their edits. |
 
-**Fallback if the hub is down:** **[CHECK]** [mybinder.org](https://mybinder.org) can build from this repo's `environment.yml`. Its free sessions usually have only 1–2 GB of RAM and can be slow to start, which is likely too little for the later chapters. Treat it as a last resort, and test it before the day if you want it.
+**Fallback if the hub is down:** GitHub Codespaces. Attendees click the *Open in GitHub Codespaces* button in the README and get JupyterLab with the same environment, on their own GitHub account's free allowance. Each attendee needs a GitHub account, so mention it in the pre-workshop email. Set up a prebuild beforehand so codespaces start in seconds (see *GitHub Codespaces → Prebuilds* in the README), and test it before the day.
+
+[mybinder.org](https://mybinder.org) can also build from this repo's `environment.yml`, but its free sessions usually have only 1–2 GB of RAM and can be slow to start, which is likely too little for the later chapters. Treat it as a last resort.
 
 ---
 
