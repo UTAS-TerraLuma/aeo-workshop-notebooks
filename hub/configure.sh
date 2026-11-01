@@ -74,6 +74,23 @@ cfg set limits.cpu "$CPU_LIMIT"
 echo "== Open JupyterLab (/lab) by default"
 cfg set user_environment.default_app jupyterlab
 
+echo "== Hide the hub setup files from attendees' file browser"
+# nbgitpuller copies the whole repo into each home folder. These names are left
+# out of listings (anywhere, not only the repo folder) but can still be opened
+# by path. The first line repeats Jupyter Server's defaults, which this replaces.
+hide_dir=/opt/tljh/user/etc/jupyter/jupyter_server_config.d
+mkdir -p "$hide_dir"
+cat > "$hide_dir/aeo-hide.json" <<'EOF'
+{
+  "ContentsManager": {
+    "hide_globs": [
+      "__pycache__", "*.pyc", "*.pyo", ".DS_Store", "*.so", "*.dylib", "*~",
+      "hub", "pixi.toml", "pixi.lock", "environment.yml", "requirements.txt"
+    ]
+  }
+}
+EOF
+
 echo "== Idle culler: stop servers idle for ${CULL_TIMEOUT}s"
 cfg set services.cull.enabled true
 cfg set services.cull.timeout "$CULL_TIMEOUT"
