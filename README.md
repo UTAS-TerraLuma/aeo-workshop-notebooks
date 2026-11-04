@@ -108,4 +108,4 @@ The imagery comes from the AEO 2026 workshop STAC catalogue on Nectar object sto
 
 Each item is one drone survey (`PLOTID-YYYYMMDD`). The notebooks use the `ms` asset (the 10-band MicaSense orthomosaic) of `NTABRT0007-20240828`. That file is a 2.8 GB cloud-optimised GeoTIFF, so `workshop_utils.load_data()` reads only a small study area (`AOI_BOUNDS`, 1342 × 1265 pixels). Nothing is downloaded to disk.
 
-Chapter 5 reads the `pointcloud` asset of the same survey: a 3.9 GB, 339-million-point COPC (cloud-optimised point cloud) that already carries ground classification and a `HeightAboveGround` dimension. It fetches only the points inside `AOI_BOUNDS` (about 7 million), plus the `chm` and `chm_hillshade` rasters.
+Chapter 5 reads the `pointcloud` asset of a different survey, `NSAMDD0013-20260414` (`LIDAR_ITEM_ID`): a 3.9 GB, 303-million-point COPC (cloud-optimised point cloud) that already carries ground classification and a `HeightAboveGround` dimension. It fetches only the points inside `LIDAR_AOI_BOUNDS`, a 50 m square over a forb patch with a few trees (about 5 million points), plus the `chm` and `chm_hillshade` rasters.

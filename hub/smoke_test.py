@@ -111,8 +111,8 @@ try:
     import numpy as np
     from laspy import Bounds, CopcReader
     start = time.perf_counter()
-    left, bottom, right, top = wu.AOI_BOUNDS
-    with CopcReader.open(wu.get_asset_href(asset_key="pointcloud")) as reader:
+    left, bottom, right, top = wu.LIDAR_AOI_BOUNDS
+    with CopcReader.open(wu.get_asset_href(wu.LIDAR_ITEM_ID, asset_key="pointcloud")) as reader:
         points = reader.query(bounds=Bounds(mins=np.array([left, bottom]),
                                             maxs=np.array([right, top])), level=range(0, 5))
     report(len(points) > 0, "COPC point cloud query",

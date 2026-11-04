@@ -37,6 +37,13 @@ ASSET_KEY = "ms"
 # This is the same area as the old local "subset3" file: 1342 x 1265 pixels.
 AOI_BOUNDS = (359842.06, 7534681.29, 359909.39, 7534744.75)
 
+# Chapter 5 (LiDAR) uses a different survey: TERN plot NSAMDD0013 (Murray
+# Darling Depression, NSW). Its study area is a 50 m x 50 m square over the
+# forb patch near the centre of the plot, with a few trees and shrubs.
+# Bounds are (left, bottom, right, top) in GDA2020 / MGA 54.
+LIDAR_ITEM_ID = "NSAMDD0013-20260414"
+LIDAR_AOI_BOUNDS = (509990.0, 6322425.0, 510040.0, 6322475.0)
+
 # Make GDAL's HTTP reads of cloud-optimised GeoTIFFs quick.
 os.environ.setdefault("GDAL_DISABLE_READDIR_ON_OPEN", "EMPTY_DIR")
 os.environ.setdefault("CPL_VSIL_CURL_ALLOWED_EXTENSIONS", ".tif")
