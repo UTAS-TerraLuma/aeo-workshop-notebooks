@@ -78,17 +78,22 @@ echo "== Hide the hub setup files from attendees' file browser"
 # nbgitpuller copies the whole repo into each home folder. These names are left
 # out of listings (anywhere, not only the repo folder) but can still be opened
 # by path. The first line repeats Jupyter Server's defaults, which this replaces.
-hide_dir=/opt/tljh/user/etc/jupyter/jupyter_server_config.d
-mkdir -p "$hide_dir"
-cat > "$hide_dir/aeo-hide.json" <<'EOF'
-{
-  "ContentsManager": {
-    "hide_globs": [
-      "__pycache__", "*.pyc", "*.pyo", ".DS_Store", "*.so", "*.dylib", "*~",
-      "hub", "pixi.toml", "pixi.lock", "environment.yml", "requirements.txt"
-    ]
-  }
-}
+# It must go in jupyter_server_config.json itself: Jupyter Server reads only
+# extension switches from jupyter_server_config.d/, so earlier versions of this
+# script, which wrote there, had no effect. Merged in, keeping other settings.
+jupyter_etc=/opt/tljh/user/etc/jupyter
+rm -f "$jupyter_etc/jupyter_server_config.d/aeo-hide.json"
+mkdir -p "$jupyter_etc"
+/opt/tljh/user/bin/python - "$jupyter_etc/jupyter_server_config.json" <<'EOF'
+import json, sys
+from pathlib import Path
+path = Path(sys.argv[1])
+config = json.loads(path.read_text() or "{}") if path.exists() else {}
+config.setdefault("ContentsManager", {})["hide_globs"] = [
+    "__pycache__", "*.pyc", "*.pyo", ".DS_Store", "*.so", "*.dylib", "*~",
+    "hub", "pixi.toml", "pixi.lock", "environment.yml", "requirements.txt",
+]
+path.write_text(json.dumps(config, indent=2) + "\n")
 EOF
 
 echo "== Idle culler: stop servers idle for ${CULL_TIMEOUT}s"
