@@ -96,7 +96,7 @@ Prebuilds run on GitHub Actions, and their storage is billed to the org per regi
 | 2 | Calculates NDVI, CIRE, CRI2 and ARI2: maps, histograms, scatter plot, correlations | `workshop_indices.tif`, `indices/*.tif` |
 | 3 | Masks NDVI by threshold and range, with an interactive map and histogram | `masked_ndvi.tif` |
 | 4 | Optional: normalises the indices, pigment-proxy composite, thresholding, basemap overlay | `pigment_rgb_relative.tif` |
-| 5 | Reads the LiDAR point cloud (COPC) for the study area: density, classes, 3D view, cross-section, structure metrics | `lidar_structure_1m.tif` |
+| 5 | Reads the LiDAR point cloud (COPC) for the study area: attributes, filtering, 3D view, cross-section, structure metrics | `lidar_structure_1m.tif` |
 
 To use a different survey or study area, pass `item_id=` or `bounds=` to `load_data()`, or change `ITEM_ID` and `AOI_BOUNDS` in `workshop_utils.py`.
 
@@ -108,4 +108,4 @@ The imagery comes from the AEO 2026 workshop STAC catalogue on Nectar object sto
 
 Each item is one drone survey (`PLOTID-YYYYMMDD`). The notebooks use the `ms` asset (the 10-band MicaSense orthomosaic) of `NTABRT0007-20240828`. That file is a 2.8 GB cloud-optimised GeoTIFF, so `workshop_utils.load_data()` reads only a small study area (`AOI_BOUNDS`, 1342 × 1265 pixels). Nothing is downloaded to disk.
 
-Chapter 5 reads the `pointcloud` asset of the same survey: a 3.9 GB, 339-million-point COPC (cloud-optimised point cloud) that already carries ground classification and a `HeightAboveGround` dimension. It fetches only the points inside `AOI_BOUNDS` (about 7 million), plus the `chm` and `chm_hillshade` rasters and the `lidar_manifest`.
+Chapter 5 reads the `pointcloud` asset of the same survey: a 3.9 GB, 339-million-point COPC (cloud-optimised point cloud) that already carries ground classification and a `HeightAboveGround` dimension. It fetches only the points inside `AOI_BOUNDS` (about 7 million), plus the `chm` and `chm_hillshade` rasters.
