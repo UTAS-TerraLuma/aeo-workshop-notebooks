@@ -17,6 +17,10 @@ dependencies:
   - pyproj>=3.6.0
   # Reads the imagery from the workshop STAC catalogue
   - pystac>=1.10
+  # LiDAR point clouds (LAS/LAZ/COPC) for Chapter 5; requests fetches over HTTP
+  - laspy>=2.5
+  - lazrs-python>=0.6
+  - requests>=2.31
   # Visualisation
   - plotly>=5.20.0
   - folium>=0.15.0

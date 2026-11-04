@@ -29,7 +29,7 @@ sys.path.insert(0, str(REPO))
 # Import name for each package the notebooks need (see pixi.toml)
 MODULES = [
     "numpy", "scipy", "pandas", "xarray", "rasterio", "rioxarray", "pyproj",
-    "pystac", "plotly", "folium", "matplotlib", "ipywidgets", "anywidget",
+    "pystac", "laspy", "lazrs", "requests", "plotly", "folium", "matplotlib", "ipywidgets", "anywidget",
     "nbformat", "jupyterlab", "notebook",
 ]
 
@@ -105,6 +105,20 @@ if ds is not None:
         report(n > 0, "compute + save GeoTIFFs", f"{n} file(s) written")
     except Exception as exc:
         report(False, "compute + save GeoTIFFs", repr(exc))
+
+# 5. Read part of the LiDAR point cloud (COPC), like Chapter 5 does
+try:
+    import numpy as np
+    from laspy import Bounds, CopcReader
+    start = time.perf_counter()
+    left, bottom, right, top = wu.AOI_BOUNDS
+    with CopcReader.open(wu.get_asset_href(asset_key="pointcloud")) as reader:
+        points = reader.query(bounds=Bounds(mins=np.array([left, bottom]),
+                                            maxs=np.array([right, top])), level=range(0, 5))
+    report(len(points) > 0, "COPC point cloud query",
+           f"{len(points):,} points in {time.perf_counter() - start:.1f} s")
+except Exception as exc:
+    report(False, "COPC point cloud query", repr(exc))
 
 peak = peak_memory_mb()
 if peak:
