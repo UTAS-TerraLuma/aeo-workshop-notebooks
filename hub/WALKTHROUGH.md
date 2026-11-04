@@ -185,7 +185,7 @@ python hub/nbgitpuller_link.py https://dronescape.io https://github.com/UTAS-Ter
 ### 11. [YOU] Test as an attendee
 
 1. In a private/incognito window, open the link and log in as `test01` with the workshop password.
-2. JupyterLab should open on `aeo-workshop-notebooks/`. In each chapter run **Kernel → Restart Kernel and Run All Cells**, then check that:
+2. JupyterLab should open on `aeo-workshop-notebooks/`. Run `CHAPTER0_SETUP_CHECK.ipynb` first: it should show all ✅. Then in each chapter run **Kernel → Restart Kernel and Run All Cells**, then check that:
    - the imagery loads (Chapter 1's first data cell),
    - the widgets, sliders, Plotly figures and Folium maps respond,
    - files appear in `aeo-workshop-notebooks/outputs/`.

@@ -18,6 +18,7 @@ import argparse
 from urllib.parse import urlencode
 
 CHAPTERS = [
+    "CHAPTER0_SETUP_CHECK.ipynb",
     "CHAPTER1_DATA_and_VISUALISATION.ipynb",
     "CHAPTER2_COMPUTING_VISUALISING_DERIVATIVES_FINAL.ipynb",
     "CHAPTER3_QA_MASKING.ipynb",

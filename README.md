@@ -4,6 +4,7 @@ Jupyter notebooks for analysing MicaSense RedEdge-P Dual multispectral drone ima
 
 | Notebook | Topic |
 | --- | --- |
+| `CHAPTER0_SETUP_CHECK.ipynb` | Start here: checks your environment is set up (✅/❌ per check) |
 | `CHAPTER1_DATA_and_VISUALISATION.ipynb` | Loading the data and visualising bands |
 | `CHAPTER2_COMPUTING_VISUALISING_DERIVATIVES_FINAL.ipynb` | Computing and visualising spectral indices |
 | `CHAPTER3_QA_MASKING.ipynb` | QA and masking |
@@ -82,10 +83,11 @@ Prebuilds run on GitHub Actions, and their storage is billed to the org per regi
    Or, with conda/mamba: `mamba activate aeo-workshop`, then `jupyter lab`.
 
    Jupyter Lab opens in your browser. If it doesn't, copy the `http://localhost:8888/lab?token=…` link from the terminal.
-2. **Run the chapters in order, 1 → 4.** In each notebook use **Kernel → Restart Kernel and Run All Cells**, or step through with <kbd>Shift</kbd>+<kbd>Enter</kbd>. Each chapter loads the imagery on its own, so you can open any chapter directly. Chapter 4 is optional and the longest.
-3. **Stay online.** The imagery streams from the workshop STAC catalogue (see [Data](#data)), so loading needs an internet connection and takes 10–20 seconds.
-4. **Use the widgets.** The dropdowns, sliders and maps only respond while the kernel is running. Change a widget and its plot redraws.
-5. **Shut down when finished.** Use **File → Shut Down**, or press <kbd>Ctrl</kbd>+<kbd>C</kbd> twice in the terminal. Each open notebook holds its imagery in memory, so shut down kernels you're done with (**Kernel → Shut Down Kernel**).
+2. **Run Chapter 0 first.** `CHAPTER0_SETUP_CHECK.ipynb` checks every package, the connection to the STAC catalogue and that plots and widgets display. Each check prints ✅ or ❌, and it finishes in under a minute.
+3. **Run the chapters in order, 1 → 4.** In each notebook use **Kernel → Restart Kernel and Run All Cells**, or step through with <kbd>Shift</kbd>+<kbd>Enter</kbd>. Each chapter loads the imagery on its own, so you can open any chapter directly. Chapter 4 is optional and the longest.
+4. **Stay online.** The imagery streams from the workshop STAC catalogue (see [Data](#data)), so loading needs an internet connection and takes 10–20 seconds.
+5. **Use the widgets.** The dropdowns, sliders and maps only respond while the kernel is running. Change a widget and its plot redraws.
+6. **Shut down when finished.** Use **File → Shut Down**, or press <kbd>Ctrl</kbd>+<kbd>C</kbd> twice in the terminal. Each open notebook holds its imagery in memory, so shut down kernels you're done with (**Kernel → Shut Down Kernel**).
 
 | Chapter | What it does | Writes to `outputs/` |
 | --- | --- | --- |
