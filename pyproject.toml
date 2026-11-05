@@ -1,6 +1,0 @@
-# marimo settings for the notebooks in this folder (the marimo pilot,
-# CHAPTER2_INDICES_MARIMO.py). Dependencies live in pixi.toml, not here.
-[tool.marimo.runtime]
-# Run every cell as soon as a notebook opens, in edit mode too (marimo's
-# default in edit mode is to wait for the user to press "run").
-auto_instantiate = true

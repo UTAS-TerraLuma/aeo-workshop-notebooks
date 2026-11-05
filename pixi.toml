@@ -9,14 +9,7 @@ channels = ["conda-forge"]
 platforms = ["win-64", "linux-64", "osx-64", "osx-arm64"]
 
 [tasks]
-# The MarimoProxyConfig flags make JupyterLab's marimo launcher use this
-# environment (its default builds a separate uv environment per notebook,
-# without our conda GDAL) and free a notebook's kernel 15 min after its tab
-# closes. The hub sets the same in hub/configure.sh.
-lab = "jupyter lab --MarimoProxyConfig.sandbox=None --MarimoProxyConfig.session_ttl=900"
-# marimo pilot: open the Chapter 2 marimo notebook as an app (code hidden)
-marimo-app = "marimo run CHAPTER2_INDICES_MARIMO.py --include-code"
-marimo-edit = "marimo edit CHAPTER2_INDICES_MARIMO.py"
+lab = "jupyter lab"
 notebook = "jupyter notebook"
 # One-off per clone: register nbstripout as a git filter
 setup-git = "nbstripout --install --attributes .gitattributes"
@@ -48,9 +41,5 @@ notebook = ">=7.2.0"
 ipywidgets = ">=8.1.0"
 anywidget = ">=0.9"  # needed by plotly FigureWidget (Chapter 3)
 nbformat = ">=5.10.0"
-# marimo pilot (CHAPTER2_INDICES_MARIMO.py); the extension adds a marimo
-# launcher to JupyterLab and serves it at <server>/marimo/
-marimo = ">=0.25"
-marimo-jupyter-extension = ">=0.5"
 # Strips notebook outputs on commit (see README)
 nbstripout = "*"

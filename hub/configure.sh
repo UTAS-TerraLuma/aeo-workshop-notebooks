@@ -120,7 +120,6 @@ config = json.loads(path.read_text() or "{}") if path.exists() else {}
 config.setdefault("ContentsManager", {})["hide_globs"] = [
     "__pycache__", "*.pyc", "*.pyo", ".DS_Store", "*.so", "*.dylib", "*~",
     "hub", "pixi.toml", "pixi.lock", "environment.yml", "requirements.txt",
-    "pyproject.toml", "__marimo__",
 ]
 # Each open chapter keeps its own kernel and its copy of the data. Shut down
 # kernels nobody has run a cell in for a while, even if the tab is still open
@@ -130,16 +129,6 @@ config.setdefault("MappingKernelManager", {}).update({
     "cull_interval": 120,
     "cull_connected": True,
     "cull_busy": False,
-})
-# marimo pilot: marimo-jupyter-extension serves marimo at <server>/marimo/
-# inside each attendee's own (capped) server. Use the shared conda
-# environment rather than its default per-notebook uv sandbox (which would
-# lack GDAL), and free a notebook's kernel 15 min after its tab closes.
-config.setdefault("MarimoProxyConfig", {}).update({
-    "sandbox": None,
-    "marimo_path": "/opt/tljh/user/bin/marimo",
-    "session_ttl": 900,
-    "skip_update_check": True,
 })
 path.write_text(json.dumps(config, indent=2) + "\n")
 EOF

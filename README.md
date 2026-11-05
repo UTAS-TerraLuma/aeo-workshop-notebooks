@@ -10,11 +10,8 @@ Jupyter notebooks for analysing MicaSense RedEdge-P Dual multispectral drone ima
 | `CHAPTER3_QA_MASKING.ipynb` | QA and masking |
 | `CHAPTER4_OPTIONAL_PROXY_DERIVATIVES.ipynb` | Optional: proxy derivatives |
 | `CHAPTER5_LIDAR_STRUCTURE.ipynb` | LiDAR point clouds and vegetation structure |
-| `CHAPTER2_INDICES_MARIMO.py` | Pilot: Chapter 2 as a [marimo](https://marimo.io) notebook |
 
 `workshop_utils.py` holds the shared helpers and must stay next to the notebooks.
-
-The marimo pilot opens from JupyterLab's launcher (the marimo tile), or on its own: `pixi run marimo-app` shows it as an app with the code hidden, `pixi run marimo-edit` opens it for editing. `pyproject.toml` only holds marimo settings; the dependencies are in `pixi.toml`.
 
 ## Setup
 
