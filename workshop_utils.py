@@ -204,8 +204,8 @@ class LiveFigure:
 # Configure Plotly automatically inside a notebook kernel, so notebooks
 # cannot forget to call setup_plotly(). Plain `python` imports
 # (e.g. hub/smoke_test.py) are unaffected.
-if _in_ipython_kernel():
-    setup_plotly()
+# if _in_ipython_kernel():
+#     setup_plotly()
 
 
 
