@@ -42,6 +42,16 @@ pip install -r requirements.txt
 
 The dependency lists live in `pixi.toml`, `environment.yml` and `requirements.txt`. Update all three when you add a package.
 
+### Before you commit (maintainers)
+
+Notebooks must be committed without outputs: saved plots make them tens of MB, and every attendee downloads them. Run this once in each clone:
+
+```bash
+pixi run setup-git
+```
+
+It installs the `nbstripout` git filter, which strips outputs automatically when you `git add` a notebook, and turns on `.githooks/pre-commit`, which refuses any commit that still contains outputs. Your local copies keep their outputs; only what goes into git is stripped. To check every notebook in the repo by hand: `sh .githooks/pre-commit --all`.
+
 ### Hosted JupyterHub (Nectar)
 
 To run the workshop on a shared JupyterHub, follow [`hub/WALKTHROUGH.md`](hub/WALKTHROUGH.md).
@@ -90,7 +100,7 @@ Prebuilds run on GitHub Actions, and their storage is billed to the org per regi
 5. **Use the widgets.** The dropdowns, sliders and maps only respond while the kernel is running. Change a widget and its plot redraws.
 6. **Shut down when finished.** Use **File → Shut Down**, or press <kbd>Ctrl</kbd>+<kbd>C</kbd> twice in the terminal. Each open notebook holds its imagery in memory, so shut down kernels you're done with (**Kernel → Shut Down Kernel**).
 
-| Chapter | What it does | Writes to `outputs/` |
+| Chapter | What it does | Writes to `outputs/` (only when its `EXPORT_...` flag is `True`) |
 | --- | --- | --- |
 | 1 | Loads the 10 bands, band summaries, true/false-colour composites, interactive basemap | — |
 | 2 | Calculates NDVI, CIRE, CRI2 and ARI2: maps, histograms, scatter plot, correlations | `workshop_indices.tif`, `indices/*.tif` |

@@ -1,0 +1,49 @@
+#!/bin/sh
+# Refuse to commit Jupyter notebooks that still contain outputs (plots,
+# printed results, widget state or execution counts). Outputs make the
+# notebooks tens of MB, and everyone who pulls the repo downloads them.
+#
+# Turned on per clone by `pixi run setup-git` (git config core.hooksPath
+# .githooks), which also installs the nbstripout filter that strips outputs
+# automatically on `git add`. With the filter installed this hook never
+# fires; it catches clones without it.
+#
+#   .githooks/pre-commit          check the notebooks staged for this commit
+#   .githooks/pre-commit --all    check every tracked notebook
+#
+# Plain sh + grep, so it needs no Python or pixi.
+
+PATTERN='"output_type"|"execution_count": *[0-9]|application/vnd\.jupyter\.widget-state\+json'
+
+if [ "$1" = "--all" ]; then
+    files=$(git ls-files -- '*.ipynb')
+    read_file() { cat -- "$1"; }
+else
+    files=$(git diff --cached --name-only --diff-filter=ACMR -- '*.ipynb')
+    read_file() { git show ":$1"; }   # the staged version, not the working copy
+fi
+
+bad=""
+for file in $files; do
+    if read_file "$file" | grep -qE "$PATTERN"; then
+        bad="$bad  $file
+"
+    fi
+done
+
+[ -z "$bad" ] && exit 0
+
+cat >&2 <<EOF
+These notebooks contain saved outputs:
+
+$bad
+Strip them, then stage them again:
+
+  pixi run nbstripout <notebook>.ipynb
+  git add <notebook>.ipynb
+
+To strip outputs automatically on every commit from now on, run once:
+
+  pixi run setup-git
+EOF
+exit 1

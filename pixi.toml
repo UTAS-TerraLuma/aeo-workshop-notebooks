@@ -11,8 +11,9 @@ platforms = ["win-64", "linux-64", "osx-64", "osx-arm64"]
 [tasks]
 lab = "jupyter lab"
 notebook = "jupyter notebook"
-# One-off per clone: register nbstripout as a git filter
-setup-git = "nbstripout --install --attributes .gitattributes"
+# One-off per clone: register nbstripout as a git filter (strips outputs on
+# `git add`) and turn on .githooks/pre-commit (refuses commits with outputs)
+setup-git = "nbstripout --install --attributes .gitattributes && git config core.hooksPath .githooks"
 
 [dependencies]
 python = "3.12.*"
