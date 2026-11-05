@@ -76,6 +76,10 @@ write_files:
       echo "===== Configuring the hub"
       bash "$REPO_DIR/hub/configure.sh"
 
+      echo "===== Caching the study areas in /srv/aeo-data"
+      /opt/tljh/user/bin/python "$REPO_DIR/hub/prepare_data_cache.py" \
+        || echo "Data cache FAILED: notebooks will read from object storage instead"
+
       echo "===== Smoke test"
       /opt/tljh/user/bin/python "$REPO_DIR/hub/smoke_test.py" \
         || echo "Smoke test FAILED: see the lines above"

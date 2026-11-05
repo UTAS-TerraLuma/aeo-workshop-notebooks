@@ -13,6 +13,11 @@
 #   CPU_LIMIT      [2]      CPU cap per attendee (whole cores).
 #   CULL_TIMEOUT   [7200]   Stop servers idle this many seconds (2 h, so a
 #                           lunch break doesn't kill anyone's kernel).
+#   KERNEL_CULL_TIMEOUT [3600]  Shut down a notebook's kernel after this many
+#                           idle seconds, even with its tab open, so chapters
+#                           people have moved on from free their memory.
+#   AEO_DATA_CACHE [/srv/aeo-data]  Shared local copy of the study areas
+#                           (hub/prepare_data_cache.py); passed to every server.
 #   HTTPS_DOMAIN   []       e.g. aeo-hub.myproject.cloud.edu.au. With
 #   HTTPS_EMAIL    []       HTTPS_EMAIL set too, turns on Let's Encrypt.
 #                           The DNS record must already point at this VM.
@@ -26,6 +31,8 @@ set -euo pipefail
 MEM_LIMIT="${MEM_LIMIT:-4G}"
 CPU_LIMIT="${CPU_LIMIT:-2}"
 CULL_TIMEOUT="${CULL_TIMEOUT:-7200}"
+KERNEL_CULL_TIMEOUT="${KERNEL_CULL_TIMEOUT:-3600}"
+AEO_DATA_CACHE="${AEO_DATA_CACHE:-/srv/aeo-data}"
 HTTPS_DOMAIN="${HTTPS_DOMAIN:-}"
 HTTPS_EMAIL="${HTTPS_EMAIL:-}"
 
@@ -71,10 +78,31 @@ echo "== Limits: ${MEM_LIMIT} RAM, ${CPU_LIMIT} CPU per attendee"
 cfg set limits.memory "$MEM_LIMIT"
 cfg set limits.cpu "$CPU_LIMIT"
 
+echo "== Environment for every server: ${CPU_LIMIT} compute threads, data cache ${AEO_DATA_CACHE}"
+# Without these, NumPy/OpenBLAS, GDAL and laspy each start one thread per vCPU
+# of the VM (32+ on a large flavour) in every kernel, all fighting over the
+# ${CPU_LIMIT}-core quota. TLJH loads extra hub config from jupyterhub_config.d.
+mkdir -p /opt/tljh/config/jupyterhub_config.d
+cat > /opt/tljh/config/jupyterhub_config.d/aeo-env.py <<EOF
+# Written by hub/configure.sh; re-run it to change.
+c.Spawner.environment.update({
+    "OMP_NUM_THREADS": "${CPU_LIMIT}",
+    "OPENBLAS_NUM_THREADS": "${CPU_LIMIT}",
+    "MKL_NUM_THREADS": "${CPU_LIMIT}",
+    "RAYON_NUM_THREADS": "${CPU_LIMIT}",
+    "GDAL_NUM_THREADS": "${CPU_LIMIT}",
+    "AEO_DATA_CACHE": "${AEO_DATA_CACHE}",
+})
+EOF
+if ! ls "$AEO_DATA_CACHE"/*.tif >/dev/null 2>&1; then
+    echo "   No study-area copy in $AEO_DATA_CACHE yet; notebooks will read from object storage."
+    echo "   Create it: sudo /opt/tljh/user/bin/python $(dirname "$0")/prepare_data_cache.py"
+fi
+
 echo "== Open JupyterLab (/lab) by default"
 cfg set user_environment.default_app jupyterlab
 
-echo "== Hide the hub setup files from attendees' file browser"
+echo "== Hide the hub setup files; shut down kernels idle for ${KERNEL_CULL_TIMEOUT}s"
 # nbgitpuller copies the whole repo into each home folder. These names are left
 # out of listings (anywhere, not only the repo folder) but can still be opened
 # by path. The first line repeats Jupyter Server's defaults, which this replaces.
@@ -84,7 +112,7 @@ echo "== Hide the hub setup files from attendees' file browser"
 jupyter_etc=/opt/tljh/user/etc/jupyter
 rm -f "$jupyter_etc/jupyter_server_config.d/aeo-hide.json"
 mkdir -p "$jupyter_etc"
-/opt/tljh/user/bin/python - "$jupyter_etc/jupyter_server_config.json" <<'EOF'
+/opt/tljh/user/bin/python - "$jupyter_etc/jupyter_server_config.json" "$KERNEL_CULL_TIMEOUT" <<'EOF'
 import json, sys
 from pathlib import Path
 path = Path(sys.argv[1])
@@ -93,6 +121,15 @@ config.setdefault("ContentsManager", {})["hide_globs"] = [
     "__pycache__", "*.pyc", "*.pyo", ".DS_Store", "*.so", "*.dylib", "*~",
     "hub", "pixi.toml", "pixi.lock", "environment.yml", "requirements.txt",
 ]
+# Each open chapter keeps its own kernel and its copy of the data. Shut down
+# kernels nobody has run a cell in for a while, even if the tab is still open
+# (cull_connected), but never one that is busy running a cell.
+config.setdefault("MappingKernelManager", {}).update({
+    "cull_idle_timeout": int(sys.argv[2]),
+    "cull_interval": 120,
+    "cull_connected": True,
+    "cull_busy": False,
+})
 path.write_text(json.dumps(config, indent=2) + "\n")
 EOF
 

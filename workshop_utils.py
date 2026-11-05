@@ -11,6 +11,7 @@ so there is nothing to download.
 # What this does: provides the shared raster, index, and display helpers used
 # by all the Jupyter notebooks.
 import os
+from functools import lru_cache
 from pathlib import Path
 import numpy as np
 import plotly.graph_objects as go
@@ -43,6 +44,18 @@ AOI_BOUNDS = (359842.06, 7534681.29, 359909.39, 7534744.75)
 # Bounds are (left, bottom, right, top) in GDA2020 / MGA 54.
 LIDAR_ITEM_ID = "NSAMDD0013-20260414"
 LIDAR_AOI_BOUNDS = (509990.0, 6322425.0, 510040.0, 6322475.0)
+
+# Optional local copy of the two study areas. On the workshop JupyterHub,
+# hub/prepare_data_cache.py downloads them once into this shared folder, so
+# 30 people don't each pull the same ~100 MB from object storage in every
+# chapter. load_data() and load_lidar_points() use the copy when it exists and
+# read from the STAC catalogue otherwise, so laptops and Codespaces need no
+# setup. Set AEO_DATA_CACHE to use another folder.
+DATA_CACHE_DIR = Path(os.environ.get("AEO_DATA_CACHE", "/srv/aeo-data"))
+
+# laspy opens cpu_count() * 5 parallel HTTP connections per COPC query by
+# default (160 on a 32-core hub, per user). A handful is just as quick.
+COPC_HTTP_THREADS = 8
 
 # Make GDAL's HTTP reads of cloud-optimised GeoTIFFs quick.
 os.environ.setdefault("GDAL_DISABLE_READDIR_ON_OPEN", "EMPTY_DIR")
@@ -134,16 +147,18 @@ def _in_ipython_kernel():
 
 def setup_plotly(scroll_zoom=True):
     """
-    Use Plotly renderers that work in JupyterLab, VS Code, classic Notebook
-    and exported HTML, and give every figure the same toolbar settings.
+    Use the Plotly renderer that works in JupyterLab, VS Code and Notebook 7,
+    and give every figure the same toolbar settings.
     Safe to call more than once.
     """
     import plotly.io as pio
 
-    pio.renderers.default = "plotly_mimetype+notebook_connected"
-    config = {"scrollZoom": scroll_zoom, "displaylogo": False}
-    for name in ("plotly_mimetype", "notebook_connected"):
-        pio.renderers[name].config = config
+    # One renderer only. "plotly_mimetype+notebook_connected" embeds every
+    # figure twice, doubling what the kernel sends to the browser.
+    pio.renderers.default = "plotly_mimetype"
+    pio.renderers["plotly_mimetype"].config = {
+        "scrollZoom": scroll_zoom, "displaylogo": False,
+    }
 
 
 class LiveFigure:
@@ -218,6 +233,7 @@ class LiveFigure:
 # Data-loading helpers
 # ---------------------------------------------------------------------------
 
+@lru_cache(maxsize=None)
 def get_asset_href(item_id=ITEM_ID, asset_key=ASSET_KEY,
                    collection_url=STAC_COLLECTION_URL):
     """Look up a survey in the STAC collection and return the URL of one asset."""
@@ -229,6 +245,19 @@ def get_asset_href(item_id=ITEM_ID, asset_key=ASSET_KEY,
     return item.assets[asset_key].get_absolute_href()
 
 
+def _cache_file(item_id, asset_key, bounds, suffix, cache_dir=None):
+    """Path of a study-area copy in DATA_CACHE_DIR, named after its bounds."""
+    corners = "_".join(f"{value:.2f}" for value in bounds)
+    base = DATA_CACHE_DIR if cache_dir is None else Path(cache_dir)
+    return base / f"{item_id}_{asset_key}_{corners}{suffix}"
+
+
+def _aoi_window(src, bounds):
+    """The whole-pixel window of src covering bounds."""
+    window = from_bounds(*bounds, transform=src.transform)
+    return window.round_offsets().round_lengths()
+
+
 def load_data(item_id=ITEM_ID, bounds=AOI_BOUNDS):
     """
     Read the MicaSense multispectral orthomosaic from the STAC catalogue as an
@@ -237,8 +266,16 @@ def load_data(item_id=ITEM_ID, bounds=AOI_BOUNDS):
     Only the pixels inside `bounds` (left, bottom, right, top, in the raster's
     CRS) are downloaded. Pass bounds=None to read the whole orthomosaic, which
     is several GB. NoData and non-positive reflectance become NaN.
+
+    If hub/prepare_data_cache.py has saved this study area to DATA_CACHE_DIR,
+    the pixels are read from that local copy instead (same values).
     """
-    href = get_asset_href(item_id)
+    cached = None
+    if bounds is not None:
+        cached = _cache_file(item_id, ASSET_KEY, bounds, ".tif")
+        if not cached.is_file():
+            cached = None
+    href = str(cached) if cached else get_asset_href(item_id)
 
     with rasterio.open(href) as src:
         if src.count != len(BAND_INFO):
@@ -247,11 +284,11 @@ def load_data(item_id=ITEM_ID, bounds=AOI_BOUNDS):
                 f"Dual image, but {href} contains {src.count}."
             )
 
-        if bounds is None:
+        if bounds is None or cached:
+            # The local copy holds exactly the study-area window
             window = rasterio.windows.Window(0, 0, src.width, src.height)
         else:
-            window = from_bounds(*bounds, transform=src.transform)
-            window = window.round_offsets().round_lengths()
+            window = _aoi_window(src, bounds)
         transform = src.window_transform(window)
 
         data = src.read(window=window, out_dtype="float32")
@@ -288,6 +325,98 @@ def load_data(item_id=ITEM_ID, bounds=AOI_BOUNDS):
                 "fwhm_nm": band["fwhm"],
             })
     return ds
+
+
+def _copc_points_table(points, level):
+    """The point attributes Chapter 5 uses, as plain NumPy columns."""
+    return {
+        "x": np.asarray(points.x), "y": np.asarray(points.y), "z": np.asarray(points.z),
+        "hag": np.asarray(points["HeightAboveGround"], dtype="float32"),
+        "classification": np.asarray(points.classification, dtype="uint8"),
+        "return_number": np.asarray(points.return_number, dtype="uint8"),
+        "number_of_returns": np.asarray(points.number_of_returns, dtype="uint8"),
+        "intensity": np.asarray(points.intensity),
+        # Colours are stored as 16-bit values; scale them to 0-255
+        "red": (np.asarray(points.red) >> 8).astype("uint8"),
+        "green": (np.asarray(points.green) >> 8).astype("uint8"),
+        "blue": (np.asarray(points.blue) >> 8).astype("uint8"),
+        "level": np.full(len(points), level, dtype="uint8"),
+    }
+
+
+def load_lidar_points(item_id=LIDAR_ITEM_ID, bounds=LIDAR_AOI_BOUNDS, max_level=20,
+                      use_cache=True):
+    """
+    Read every point inside `bounds` (left, bottom, right, top) from the
+    survey's COPC point cloud, one octree level at a time, as a pandas
+    DataFrame with a `level` column.
+
+    Each level is one `reader.query(bounds=..., level=n)` call. If
+    hub/prepare_data_cache.py has saved this study area to DATA_CACHE_DIR,
+    the points come from that local copy instead (same values).
+    """
+    import pandas as pd
+    from laspy import Bounds, CopcReader
+
+    cached = _cache_file(item_id, "pointcloud", bounds, ".npz")
+    if use_cache and cached.is_file():
+        with np.load(cached) as columns:
+            return pd.DataFrame({name: columns[name] for name in columns.files})
+
+    left, bottom, right, top = bounds
+    aoi = Bounds(mins=np.array([left, bottom]), maxs=np.array([right, top]))
+    parts = []
+    url = get_asset_href(item_id, asset_key="pointcloud")
+    with CopcReader.open(url, http_num_threads=COPC_HTTP_THREADS) as reader:
+        for level in range(max_level):
+            points = reader.query(bounds=aoi, level=level)
+            if len(points) == 0:
+                break
+            parts.append(pd.DataFrame(_copc_points_table(points, level)))
+    return pd.concat(parts, ignore_index=True)
+
+
+def prepare_data_cache(cache_dir=None):
+    """
+    Save local copies of the two study areas (the multispectral window read by
+    load_data() and the points read by load_lidar_points()) to cache_dir
+    (default DATA_CACHE_DIR). Run once on the hub: see hub/prepare_data_cache.py.
+    Returns the paths written.
+    """
+    cache_dir = Path(cache_dir) if cache_dir is not None else DATA_CACHE_DIR
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    written = []
+
+    # Multispectral: the raw study-area window, values untouched
+    raster_path = _cache_file(ITEM_ID, ASSET_KEY, AOI_BOUNDS, ".tif", cache_dir)
+    with rasterio.open(get_asset_href(ITEM_ID)) as src:
+        window = _aoi_window(src, AOI_BOUNDS)
+        data = src.read(window=window)
+        profile = src.profile.copy()
+        profile.update(
+            driver="GTiff", width=data.shape[2], height=data.shape[1],
+            transform=src.window_transform(window), tiled=True,
+            blockxsize=512, blockysize=512, compress="deflate",
+            predictor=3 if data.dtype.kind == "f" else 2,
+        )
+    # Write under a temporary name so readers never see a half-written file
+    partial = raster_path.with_suffix(".partial.tif")
+    with rasterio.open(partial, "w", **profile) as dst:
+        dst.write(data)
+    partial.replace(raster_path)
+    written.append(raster_path)
+
+    # LiDAR: one array per column
+    lidar_path = _cache_file(LIDAR_ITEM_ID, "pointcloud", LIDAR_AOI_BOUNDS, ".npz", cache_dir)
+    points = load_lidar_points(use_cache=False)
+    partial = lidar_path.with_suffix(".partial.npz")
+    np.savez(partial, **{name: points[name].to_numpy() for name in points.columns})
+    partial.replace(lidar_path)
+    written.append(lidar_path)
+
+    for path in written:
+        print(f"Saved: {path} ({path.stat().st_size / 1e6:.0f} MB)")
+    return written
 
 
 def compute_indices(ds, names=None, reflectance_floor=0.01):
@@ -616,6 +745,21 @@ def save_indices_to_tiff(
 # Shared projected-CRS Plotly helpers
 # ---------------------------------------------------------------------------
 
+# Plotly maps sit in panels a few hundred screen pixels wide, so sending the
+# full-resolution raster to the browser only costs bandwidth (every pixel is
+# serialised into the notebook). Maps keep every n-th pixel so the longer
+# side has at most this many pixels. Statistics, histograms and exports
+# always use every pixel. Pass max_px=None to a helper to draw everything.
+DISPLAY_MAX_PX = 700
+
+
+def display_stride(shape, max_px=DISPLAY_MAX_PX):
+    """Step n so that keeping every n-th pixel leaves at most max_px per side."""
+    if max_px is None:
+        return 1
+    return max(1, int(np.ceil(max(shape[:2]) / max_px)))
+
+
 def projected_plot_context(ds, tick_count=6, tick_step=5):
     """Return validated projected coordinates and compact axis formatting.
 
@@ -828,9 +972,13 @@ def make_projected_heatmap(
     colorbar=None,
     hover_name=None,
     value_label="Value",
+    max_px=DISPLAY_MAX_PX,
 ):
-    """Create a Plotly map using the Dataset's native projected CRS."""
-    """ make_projected_heatmap() creates the coloured raster/index map on the left side of your figure.""" 
+    """Create a Plotly map using the Dataset's native projected CRS.
+
+    The colour limits come from every pixel; the drawn map keeps every n-th
+    pixel (see DISPLAY_MAX_PX) so the browser receives a light figure.
+    """
 
     context = projected_plot_context(ds) if context is None else context
     if array is None:
@@ -858,12 +1006,14 @@ def make_projected_heatmap(
     if low >= high:
         high = low + 1e-6
 
-    name = hover_name or variable or "Raster"
-    unit = context["unit_label"]
+    # Keep every n-th pixel for display. Shift the sampled centres by half a
+    # display cell so the drawn map still covers the raster's full extent.
+    step = display_stride(array.shape, max_px)
+    shift = (step - 1) / 2
     return go.Heatmap(
-        x=context["x"],
-        y=context["y"],
-        z=array,
+        x=context["x"][::step] + shift * context["dx"],
+        y=context["y"][::step] + shift * context["dy"],
+        z=array[::step, ::step],
         colorscale=colorscale,
         zmin=low,
         zmax=high,
@@ -886,8 +1036,13 @@ def make_projected_image(
     context=None,
     customdata=None,
     hovertemplate=None,
+    max_px=DISPLAY_MAX_PX,
 ):
-    """Create a georeferenced Plotly RGB/RGBA Image trace."""
+    """Create a georeferenced Plotly RGB/RGBA Image trace.
+
+    Like make_projected_heatmap, the drawn image (and customdata) keeps every
+    n-th pixel so the browser receives a light figure.
+    """
 
     context = projected_plot_context(ds) if context is None else context
     image = np.asarray(image)
@@ -901,12 +1056,16 @@ def make_projected_image(
             f"Easting: %{{x:,.3f}} {unit}<br>"
             f"Northing: %{{y:,.3f}} {unit}<extra></extra>"
         )
+    step = display_stride(image.shape, max_px)
+    shift = (step - 1) / 2
+    if customdata is not None:
+        customdata = np.asarray(customdata)[::step, ::step]
     return go.Image(
-        z=image,
-        x0=float(context["x"][0]),
-        y0=float(context["y"][0]),
-        dx=context["dx"],
-        dy=context["dy"],
+        z=image[::step, ::step],
+        x0=float(context["x"][0] + shift * context["dx"]),
+        y0=float(context["y"][0] + shift * context["dy"]),
+        dx=context["dx"] * step,
+        dy=context["dy"] * step,
         customdata=customdata,
         hovertemplate=hovertemplate,
         name="",
@@ -1256,6 +1415,7 @@ def plot_raster_grid(
     context = projected_plot_context(ds)
     ncols = min(int(cols), len(variables))
     nrows = (len(variables) + ncols - 1) // ncols
+    panel_px = max(max(750, width_per_panel * ncols) // ncols, height_per_panel) + 50
     titles = []
     for name in variables:
         meta = _plot_metadata(metadata, name)
@@ -1310,6 +1470,8 @@ def plot_raster_grid(
                 colorbar=colorbar,
                 hover_name=name,
                 value_label=name,
+                # Roughly one data pixel per screen pixel of the panel
+                max_px=panel_px,
             ),
             row=row,
             col=col,
