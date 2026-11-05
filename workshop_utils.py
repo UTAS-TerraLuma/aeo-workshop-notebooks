@@ -116,6 +116,104 @@ INDEX_INFO = {
 # Ordered list of the workshop index names: ["NDVI", "CIRE", "CRI2", "ARI2"]
 WORKSHOP_INDICES = list(INDEX_INFO.keys())
 
+
+
+# ---------------------------------------------------------------------------
+# Notebook display helpers
+# ---------------------------------------------------------------------------
+
+def _in_ipython_kernel():
+    """True when running inside a Jupyter/IPython kernel."""
+    try:
+        from IPython import get_ipython
+    except ImportError:
+        return False
+    shell = get_ipython()
+    return shell is not None and hasattr(shell, "kernel")
+
+
+def setup_plotly(scroll_zoom=True):
+    """
+    Use Plotly renderers that work in JupyterLab, VS Code, classic Notebook
+    and exported HTML, and give every figure the same toolbar settings.
+    Safe to call more than once.
+    """
+    import plotly.io as pio
+
+    pio.renderers.default = "plotly_mimetype+notebook_connected"
+    config = {"scrollZoom": scroll_zoom, "displaylogo": False}
+    for name in ("plotly_mimetype", "notebook_connected"):
+        pio.renderers[name].config = config
+
+
+class LiveFigure:
+    """
+    A notebook slot holding one figure (or any displayable object) that can
+    be replaced from widget callbacks::
+
+        view = LiveFigure(make_fig())
+        display(view)
+        dropdown.observe(lambda change: view.update(make_fig()), names="value")
+
+    It is an ipywidgets.Output whose content is set directly, not captured
+    with ``with output: fig.show()``. Captured Plotly output can stay blank
+    in some front ends and stalls headless runs; setting it directly works
+    in JupyterLab, VS Code and headless execution.
+    """
+
+    def __init__(self, obj=None):
+        import ipywidgets as widgets
+
+        self.widget = widgets.Output()
+        if obj is not None:
+            self.update(obj)
+
+    @staticmethod
+    def _bundle(obj):
+        if hasattr(obj, "_repr_mimebundle_"):
+            bundle = obj._repr_mimebundle_()
+            if isinstance(bundle, tuple):   # some objects return (data, metadata)
+                return bundle
+            return bundle, {}
+        from IPython import get_ipython
+        shell = get_ipython()
+        if shell is None:
+            return {"text/plain": repr(obj)}, {}
+        return shell.display_formatter.format(obj)
+
+    def update(self, obj):
+        """Replace the slot's content with obj."""
+        data, metadata = self._bundle(obj)
+        self.widget.outputs = (
+            {"output_type": "display_data", "data": data, "metadata": metadata},
+        )
+
+    def show_error(self, exc):
+        """Show an exception inside the slot instead of losing it silently."""
+        import traceback
+        text = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
+        self.widget.outputs = (
+            {"output_type": "stream", "name": "stderr", "text": text},
+        )
+
+    def _ipython_display_(self):
+        from IPython.display import display
+        display(self.widget)
+
+
+# Configure Plotly automatically inside a notebook kernel, so notebooks
+# cannot forget to call setup_plotly(). Plain `python` imports
+# (e.g. hub/smoke_test.py) are unaffected.
+if _in_ipython_kernel():
+    setup_plotly()
+
+
+
+
+
+
+
+
 # ---------------------------------------------------------------------------
 # Data-loading helpers
 # ---------------------------------------------------------------------------
@@ -1019,11 +1117,14 @@ def interactive_raster_explorer(
     width=1150,
     height=550,
 ):
-    """Display a dropdown-controlled projected raster map and histogram."""
+    """
+    Display a dropdown-controlled projected raster map and histogram.
 
+    Returns ``(dropdown, LiveFigure)``.
+    """
     try:
         import ipywidgets as widgets
-        from IPython.display import Markdown, clear_output, display
+        from IPython.display import Markdown, display
     except ImportError as exc:
         raise ImportError(
             "interactive_raster_explorer requires ipywidgets and IPython."
@@ -1050,73 +1151,75 @@ def interactive_raster_explorer(
         value=selected,
         description=dropdown_description,
     )
-    output = widgets.Output()
 
-    def render(change=None):
-        with output:
-            clear_output(wait=True)
-            name = selector.value
-            meta = _plot_metadata(metadata, name)
-            if show_metadata and meta:
-                rows = []
-                for label, key in (
-                    ("Formula", "formula"),
-                    ("Bands used", "bands_used"),
-                    ("Purpose", "purpose"),
-                    ("Interpretation", "interpretation"),
-                ):
-                    if meta.get(key):
-                        rows.append(f"| {label} | {meta[key]} |")
-                if rows:
-                    display(Markdown(
-                        f"**{name} — {meta.get('full_name', name)}**\n\n"
-                        "| | |\n|---|---|\n" + "\n".join(rows)
-                    ))
-
-            fig = plot_raster_distribution(
-                ds,
-                variable=name,
-                metadata=metadata,
-                colorscale=colorscale,
-                histogram_color=histogram_color,
-                value_label=value_label,
-                robust=robust,
-                percentiles=percentiles,
-                bins=bins,
-                statistics=statistics,
-                show_colorbar=show_colorbar,
-                width=width,
-                height=height,
-                title=" ",  # Remove overall title
-                show=False,
+    def describe(name):
+        meta = _plot_metadata(metadata, name)
+        rows = [
+            f"| {label} | {meta[key]} |"
+            for label, key in (
+                ("Formula", "formula"),
+                ("Bands used", "bands_used"),
+                ("Purpose", "purpose"),
+                ("Interpretation", "interpretation"),
             )
+            if meta.get(key)
+        ]
+        if not rows:
+            return Markdown(f"**{name}**")
+        return Markdown(
+            f"**{name} — {meta.get('full_name', name)}**\n\n"
+            "| | |\n|---|---|\n" + "\n".join(rows)
+        )
 
-            # Use abbreviated subplot titles
-            fig.layout.annotations[0].text = name
-            fig.layout.annotations[1].text = f"{name} distribution"
+    def build(name):
+        fig = plot_raster_distribution(
+            ds,
+            variable=name,
+            metadata=metadata,
+            colorscale=colorscale,
+            histogram_color=histogram_color,
+            value_label=value_label,
+            robust=robust,
+            percentiles=percentiles,
+            bins=bins,
+            statistics=statistics,
+            show_colorbar=show_colorbar,
+            width=width,
+            height=height,
+            title=" ",
+            show=False,
+        )
+        # Short subplot titles
+        fig.layout.annotations[0].text = name
+        fig.layout.annotations[1].text = f"{name} distribution"
+        if show_colorbar:
+            # Place the colour bar between the map and the histogram
+            fig.data[0].update(colorbar=dict(
+                title=name, x=0.455, xanchor="left", y=0.5,
+                len=0.82, thickness=12, xpad=4,
+            ))
+        fig.update_layout(margin=dict(l=90, r=40, t=70, b=85))
+        return fig
 
-            # Position the colour bar beside the index map
-            if show_colorbar:
-                fig.data[0].update(
-                    colorbar=dict(
-                        title=name,
-                        x=0.455,
-                        xanchor="left",
-                        y=0.5,
-                        len=0.82,
-                        thickness=12,
-                        xpad=4,
-                    )
-                )
+    # First draw: any error here is raised normally in the cell.
+    text_view = LiveFigure(describe(selected)) if show_metadata else None
+    figure_view = LiveFigure(build(selected))
+    display(selector)
+    if text_view is not None:
+        display(text_view)
+    display(figure_view)
 
-            fig.update_layout(margin=dict(l=90, r=40, t=70, b=85))
-
-            fig.show(config={"scrollZoom": True, "displaylogo": False})
+    def render(change):
+        name = change["new"]
+        try:
+            if text_view is not None:
+                text_view.update(describe(name))
+            figure_view.update(build(name))
+        except Exception as exc:  # show callback errors instead of a blank plot
+            figure_view.show_error(exc)
 
     selector.observe(render, names="value")
-    display(selector, output)
-    render()
-    return selector, output
+    return selector, figure_view
 
 
 def plot_raster_grid(
@@ -1135,7 +1238,11 @@ def plot_raster_grid(
     save_path=None,
     show=True,
 ):
-    """Plot any collection of 2-D Dataset variables in projected coordinates."""
+    """Plot any collection of 2-D Dataset variables in projected coordinates.
+
+    With ``show_colorbars=True`` every panel gets its own colour bar, placed
+    just to the right of that panel's map.
+    """
 
     variables = list(variables)
     if not variables:
@@ -1158,7 +1265,8 @@ def plot_raster_grid(
         rows=nrows,
         cols=ncols,
         subplot_titles=titles,
-        horizontal_spacing=0.10,
+        # Extra space between columns so each colour bar fits beside its map
+        horizontal_spacing=0.16 if show_colorbars else 0.10,
         vertical_spacing=0.16,
     )
 
@@ -1173,6 +1281,22 @@ def plot_raster_grid(
         )
         low = _plot_option(vmin, name, None)
         high = _plot_option(vmax, name, None)
+
+        # One colour bar per panel, just right of its own map.
+        # Without explicit positions Plotly stacks every bar at the far right.
+        colorbar = {"title": name, "thickness": 12}
+        if show_colorbars:
+            suffix = "" if position == 0 else str(position + 1)
+            x_domain = fig.layout[f"xaxis{suffix}"].domain
+            y_domain = fig.layout[f"yaxis{suffix}"].domain
+            colorbar.update(
+                x=x_domain[1] + 0.01,
+                xanchor="left",
+                y=(y_domain[0] + y_domain[1]) / 2,
+                yanchor="middle",
+                len=(y_domain[1] - y_domain[0]) * 0.9,
+            )
+
         fig.add_trace(
             make_projected_heatmap(
                 ds,
@@ -1183,7 +1307,7 @@ def plot_raster_grid(
                 zmax=high,
                 robust=robust,
                 showscale=show_colorbars,
-                colorbar={"title": name, "thickness": 12},
+                colorbar=colorbar,
                 hover_name=name,
                 value_label=name,
             ),
@@ -1214,7 +1338,8 @@ def plot_raster_grid(
         width=max(750, width_per_panel * ncols),
         height=max(500, height_per_panel * nrows + 120),
         showlegend=False,
-        margin={"l": 90, "r": 50, "t": 125, "b": 90},
+        # Wider right margin so the last column's colour bar is not clipped
+        margin={"l": 90, "r": 90 if show_colorbars else 50, "t": 125, "b": 90},
     )
 
     if save_path is not None:
@@ -1237,33 +1362,26 @@ def plot_indices(
     robust=True,
     vmin=None,
     vmax=None,
-    show_colorbars=False,
+    show_colorbars=True,
     width_per_panel=430,
     height_per_panel=390,
     save_path=None,
     show=True,
 ):
+    """Plot spectral indices as a grid of projected maps, one colour bar each.
+
+    Pass ``show_colorbars=False`` to hide the colour bars.
+    """
     names = _resolve_indices(ds, indices)
-    # metadata = {
-        # name: {
-            # **INDEX_INFO[name],
-            # "label": f"{name} — {INDEX_INFO[name]['full_name']}",
-            # "colorscale": INDEX_CMAPS.get(name, "Viridis"),
-        # }
-        # for name in names
-    # }
     metadata = {
         name: {
             **INDEX_INFO[name],
-
-            # Show only the abbreviated index name
-            "label": name,
-
+            "label": name,  # Show only the abbreviated index name
             "colorscale": INDEX_CMAPS.get(name, "Viridis"),
         }
         for name in names
     }
-    
+
     return plot_raster_grid(
         ds,
         variables=names,
@@ -1276,11 +1394,7 @@ def plot_indices(
         show_colorbars=show_colorbars,
         width_per_panel=width_per_panel,
         height_per_panel=height_per_panel,
-        title=" ",  # Removes the overall workshop title
-        # title=(
-            # f"Workshop Spectral Indices — "
-            # f"{ds.attrs.get('filename', 'MicaSense RedEdge-P Dual')}"
-        # ),
+        title=" ",  # No overall title
         save_path=save_path,
         show=show,
     )
