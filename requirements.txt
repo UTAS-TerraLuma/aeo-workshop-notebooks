@@ -31,6 +31,10 @@ ipywidgets>=8.1.0
 anywidget>=0.9  # needed by plotly FigureWidget (Chapter 3)
 nbformat>=5.10.0
 
+# marimo pilot (CHAPTER2_INDICES_MARIMO.py) and its JupyterLab launcher
+marimo>=0.25
+marimo-jupyter-extension>=0.5
+
 # Matplotlib is used internally by some dependencies; keep it available
 matplotlib>=3.8.0
 

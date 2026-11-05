@@ -11,6 +11,8 @@ outputs/
 __pycache__/
 *.pyc
 .ipynb_checkpoints/
+# marimo's caches and output snapshots (marimo export writes these)
+__marimo__/
 
 # OS / editors
 .DS_Store

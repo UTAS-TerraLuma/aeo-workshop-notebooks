@@ -14,7 +14,7 @@ Each step is tagged:
 | --- | --- |
 | `cloud-init.yaml` | Paste into Nectar's *Customisation Script* at launch. Installs TLJH 2.0.0, clones this repo to `/opt/aeo-workshop-notebooks`, runs the three scripts below. |
 | `install-env.sh` | Installs the workshop packages from conda-forge into the shared user environment (`/opt/tljh/user`). Reads the package list from `pixi.toml` (minus `nbstripout`), so there is no extra list to keep in sync. `--dry-run` prints the list. |
-| `configure.sh` | Applies the hub settings with `tljh-config`: login, per-user limits, idle culler, JupyterLab as default, and HTTPS. Also caps each server's NumPy/GDAL/laspy threads at `CPU_LIMIT` (by default they start one per vCPU of the VM in every kernel), shuts down kernels idle for an hour (`KERNEL_CULL_TIMEOUT`) so chapters people have moved on from free their memory, and points servers at the data cache. Also hides `hub/` and the pixi/conda files from attendees' file browser. Settings are environment variables, documented at the top of the file. |
+| `configure.sh` | Applies the hub settings with `tljh-config`: login, per-user limits, idle culler, JupyterLab as default, and HTTPS. Also caps each server's NumPy/GDAL/laspy threads at `CPU_LIMIT` (by default they start one per vCPU of the VM in every kernel), shuts down kernels idle for an hour (`KERNEL_CULL_TIMEOUT`) so chapters people have moved on from free their memory, and points servers at the data cache. Configures the marimo launcher for the marimo pilot too (see step 10). Also hides `hub/` and the pixi/conda files from attendees' file browser. Settings are environment variables, documented at the top of the file. |
 | `prepare_data_cache.py` | Downloads the two study areas once (multispectral ~50 MB, LiDAR ~180 MB) into `/srv/aeo-data`. `load_data()` and `load_lidar_points()` read that local copy when it exists, so attendees don't each re-download ~100 MB per chapter from object storage. Without it the notebooks still work, just slower. `cloud-init.yaml` runs it; re-run it on an existing hub with `sudo /opt/tljh/user/bin/python /opt/aeo-workshop-notebooks/hub/prepare_data_cache.py`. |
 | `smoke_test.py` | Imports every package, reads the imagery from the STAC catalogue, computes indices and writes GeoTIFFs. Prints OK/FAIL per check. Passes locally under pixi; it reads 65 MB in about 13 s. |
 | `nbgitpuller_link.py` | Prints the links you hand to attendees. |
@@ -183,13 +183,19 @@ Hand out **`https://dronescape.io/aeo-workshop-notebooks`**. For links that open
 python hub/nbgitpuller_link.py https://dronescape.io https://github.com/UTAS-TerraLuma/aeo-workshop-notebooks
 ```
 
+#### marimo pilot
+
+`CHAPTER2_INDICES_MARIMO.py` is Chapter 2 rewritten as a [marimo](https://marimo.io) notebook. `install-env.sh` installs marimo and `marimo-jupyter-extension` (from `pixi.toml`), and `configure.sh` sets the extension up. Each attendee's marimo runs inside their own Jupyter server, so it shares their `MEM_LIMIT`/`CPU_LIMIT` and is culled with it. The last link `nbgitpuller_link.py` prints opens the notebook in marimo's app view: code hidden, every cell already run. The pencil button at the bottom right switches to edit mode; edits save to the attendee's own copy of the `.py` file, which never stores outputs. JupyterLab's launcher also has a marimo tile.
+
+Not yet tested on the hub: that the link survives the nbgitpuller redirect, and how long marimo takes to start the first time.
+
 ### 11. [YOU] Test as an attendee
 
 1. In a private/incognito window, open the link and log in as `test01` with the workshop password.
 2. JupyterLab should open on `aeo-workshop-notebooks/`. Run `CHAPTER0_SETUP_CHECK.ipynb` first: it should show all ✅. Then in each chapter run **Kernel → Restart Kernel and Run All Cells**, then check that:
    - the imagery loads (Chapter 1's first data cell),
    - the widgets, sliders, Plotly figures and Folium maps respond,
-   - files appear in `aeo-workshop-notebooks/outputs/`.
+   - files appear in `aeo-workshop-notebooks/outputs/` when you set an `EXPORT_...` flag to `True` (exports are off by default).
 3. The memory indicator in the JupyterLab status bar shows usage against the limit. Note the peak for each chapter. It tells you whether `MEM_LIMIT` fits.
 4. Delete `test01` afterwards on the Admin page (*Edit User* → **Delete User**).
 
